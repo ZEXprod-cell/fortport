@@ -1064,6 +1064,23 @@ img {
     transform: scaleX(-1);
 }
 
+/* Hide any leftover dock-zone overlays (blue dashed fields) no matter what */
+.mascot-dock-zones,
+.mascot-dock-zone,
+.mascot-dock-zone-left,
+.mascot-dock-zone-right,
+.mascot-dock-zone-bottom,
+.mascot-dock-zone-active,
+.mascot-dock-zones-visible {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+.mascot-dummy.mascot-dock-preview .mascot-video {
+    filter: none !important;
+}
+
 .mascot-being-petted .mascot-video {
     filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15)) brightness(1.08);
 }
@@ -9931,4 +9948,37 @@ padding-left:10px;
   .comment-notification-target {
     animation: none;
   }
+}
+
+/* Online users counter */
+.online-users-widget {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 100000;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 14px;
+    border: 1px solid rgba(255, 255, 255, .9);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .88);
+    box-shadow: 0 5px 18px rgba(34, 84, 132, .25), inset 0 1px rgba(255, 255, 255, .9);
+    color: #23527c;
+    font: 600 14px/1.2 Arial, sans-serif;
+    backdrop-filter: blur(8px);
+}
+.online-users-widget strong { color: #126b3a; }
+.online-users-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    border-radius: 50%;
+    background: #31c66b;
+    box-shadow: 0 0 0 3px rgba(49, 198, 107, .18);
+    animation: online-users-pulse 1.8s ease-in-out infinite;
+}
+@keyframes online-users-pulse { 50% { transform: scale(.75); opacity: .65; } }
+@media (max-width: 560px) {
+    .online-users-widget { right: 10px; bottom: 10px; padding: 8px 11px; font-size: 12px; }
 }

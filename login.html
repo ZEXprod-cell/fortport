@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="icon" type="image/x-icon" href="https://fortport.ru/fortport.ico">
+    <title>ФортПорт - Войти</title>
+    <link rel="stylesheet" href="/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  function isMobile() {
+    return window.innerWidth <= 768 || 
+           /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  }
+  
+  if (isMobile()) {
+    window.location.href = "/mobile/login";
+  }
+</script>
+    <style>
+        .auth-container {
+            min-width: 300px;
+            max-width: 300px;
+            margin-top:150px;
+	    margin-left:170px;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 5px 10px 10px -5px rgba(0, 10, 90, 0.4);
+            border: 4px solid #cccfe0;
+            border-style: outset;
+        }
+        
+        .auth-container h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #15141c;
+        }
+        
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .auth-form input {
+            padding: 12px;
+            font-size: 18px;
+            border: 2px solid #bccee2;
+            border-radius: 8px;
+            background: #edeff4;
+        }
+        
+        .auth-form button {
+            background-color: #bef1fc;
+            font-size: 18px;
+            border: none;
+            padding: 12px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        
+        .auth-form button:hover {
+            background-color: #9fd9e8;
+        }
+        
+        .auth-link {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 16px;
+        }
+        
+        .error {
+            color: #ff4444;
+            text-align: center;
+            font-size: 16px;
+            min-height: 20px;
+        }
+        
+        .success {
+            color: #44aa44;
+            text-align: center;
+            font-size: 16px;
+        }
+        
+        .add-email-container {
+            text-align: center;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #bccee2;
+        }
+        
+        .add-email-container input {
+            width: 100%;
+            box-sizing: border-box;
+            margin-top: 10px;
+        }
+    </style>
+    <script defer src="/scripts/bot-challenge.js"></script>
+</head>
+<body style="background-image: url('https://fortport.ru/reglogin_bg.webp'); background-position:center">
+    <div class="auth-container">
+        <h1>Подключиться</h1>
+        <h3 style="text-align:center;">вход в аккаунт</h3>
+        
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+        
+        <form class="auth-form" id="login-form">
+            <input type="text" id="login-identifier" placeholder="Имя пользователя или Email" required autocomplete="username">
+            <input type="password" id="password" placeholder="Пароль" autocomplete="password" required>
+            <button type="submit">Войти</button>
+        </form>
+        
+        <div class="auth-link">
+            <a href="/register.html">Нет аккаунта?</a>
+        </div>
+        
+        <div id="add-email-container" class="add-email-container" style="display: none;">
+            <p>Для безопасности, добавьте email к аккаунту:</p>
+            <input type="email" id="add-email-input" placeholder="Email">
+            <button id="add-email-btn" class="postbutton" style="margin-top: 10px;">Добавить email</button>
+            <button id="skip-email-btn" style="background: none; border: none; color: #666; cursor: pointer; margin-top: 10px; font-size: 14px;">Пропустить</button>
+        </div>
+    </div>
+    
+    <script src="/scripts/login.js"></script>
+  <script src="/scripts/online-counter.js"></script>
+</body>
+</html>

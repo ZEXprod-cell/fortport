@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="icon" type="image/x-icon" href="https://fortport.ru/fortport.ico">
+    <title>ФортПорт - Создать порт (Мобильная)</title>
+    <link rel="stylesheet" href="/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            background-image: url('/reglogin_bg.webp');
+            background-size: cover;
+            background-position: center;
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .auth-container {
+            width: 100%;
+            max-width: 360px;
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border: 3px solid #cccfe0;
+            box-sizing: border-box;
+        }
+
+        .auth-container h1 {
+            text-align: center;
+            margin: 0 0 5px 0;
+            color: #15141c;
+            font-size: 24px;
+        }
+
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .auth-form input {
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #bccee2;
+            border-radius: 8px;
+            background: #edeff4;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .tg-box {
+            font-size: 13px;
+            color: #2c5282;
+            background: #eef8ff;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #bce1ff;
+            line-height: 1.4;
+        }
+
+        .tg-box a {
+            color: #0088cc;
+            font-weight: bold;
+        }
+
+        .auth-form button {
+            background-color: #bef1fc;
+            font-size: 18px;
+            border: none;
+            padding: 12px;
+            cursor: pointer;
+            border-radius: 8px;
+            font-weight: bold;
+            color: #15141c;
+        }
+
+        .auth-form button:disabled {
+            opacity: 0.5;
+            background-color: #ccc;
+        }
+
+        .auth-link {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 15px;
+        }
+
+        .auth-link a {
+            color: #2c5282;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .error {
+            color: #ff4444;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+    <script defer src="/scripts/bot-challenge.js"></script>
+</head>
+<body>
+    <div class="auth-container">
+        <h1>Новый порт</h1>
+        <div style="text-align:center; color:#666; font-size:14px;">Регистрация по инвайтам 1 на 1</div>
+
+        <div id="error" class="error"></div>
+        <div id="success" style="color:green; text-align:center; font-size:14px;"></div>
+
+        <form class="auth-form" id="register-form">
+            <input type="text" id="username" placeholder="Имя пользователя" required autocomplete="off">
+            <input type="email" id="email" placeholder="Email" required autocomplete="off">
+            <input type="password" id="password" placeholder="Пароль" required autocomplete="off">
+
+            <input type="text" id="invite-code" placeholder="Инвайт-код (FP-XXXXXX)" required style="text-transform: uppercase; font-weight: bold;">
+
+            <div class="tg-box">
+                🤖 <b>Подтверждение через ТГ:</b><br>
+                Откройте бот <a href="https://t.me/FortPortBot" target="_blank">@FortPortBot</a> в Telegram и введите <code>/start</code>.
+            </div>
+
+            <input type="text" id="telegram-code" placeholder="Код из Telegram" required>
+
+            <div class="checkbox-group">
+                <label class="checkbox-item">
+                    <input type="checkbox" id="agree-terms"> Условия использования
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="agree-privacy"> Политика конфиденциальности
+                </label>
+            </div>
+
+            <button type="submit" id="register-btn" disabled>Зарегистрироваться</button>
+        </form>
+
+        <div class="auth-link">
+            Есть аккаунт? <a href="/login">Войти</a>
+        </div>
+    </div>
+
+    <script type="module" src="/scripts/register.js"></script>
+  <script src="/scripts/online-counter.js"></script>
+</body>
+</html>

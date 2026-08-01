@@ -10,13 +10,13 @@ const https = require('https')
 const saltRounds = 10
 const app = express()
 const sqlite3 = require('sqlite3').verbose();
-const dbPath = path.join(__dirname, 'api', 'chats.db');
+const dbPath = path.join(__dirname, 'data', 'chats.db');
 const db = new sqlite3.Database(dbPath);
 const crypto = require('crypto');
-const sessionsDb = new sqlite3.Database(path.join(__dirname, 'api', 'sessions.db'));
+const sessionsDb = new sqlite3.Database(path.join(__dirname, 'data', 'sessions.db'));
 const rateLimit = require('express-rate-limit');
 const zlib = require('zlib');
-const mainDbPath = path.join(__dirname, 'api', 'main.db');
+const mainDbPath = path.join(__dirname, 'data', 'main.db');
 const mainDb = new sqlite3.Database(mainDbPath);
 
 function dbRun(database, sql, params = []) {
@@ -502,6 +502,18 @@ app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store')
   next()
 })
+
+// Reject unmistakably automated clients before they reach API handlers. User-Agent
+// filtering is deliberately paired with the JavaScript challenge below, since it can
+// be forged by a determined bot.
+const blockedUserAgent = /(?:^$|\b(?:bot|crawler|spider|scrapy|curl|wget|python-requests|axios|headless)\b)/i;
+app.use('/api', (req, res, next) => {
+  const userAgent = req.get('user-agent') || '';
+  if (blockedUserAgent.test(userAgent)) {
+    return res.status(403).json({ error: 'Automated requests are not allowed' });
+  }
+  next();
+})
 const blockedStaticRoots = new Set([
   'backups',
   'config',
@@ -689,6 +701,110 @@ async function authenticate(req, res, next) {
     });
   });
 }
+
+
+// ============ ONLINE USERS COUNTER ============
+// In-memory presence is intentionally per server process. A user is counted once,
+// regardless of how many tabs are open.
+const onlineUsers = new Map(); // Map<userId, Map<browserTabId, lastHeartbeatMs>>
+const ONLINE_TTL_MS = 75 * 1000;
+
+function removeInactiveOnlineUsers() {
+  const expiresBefore = Date.now() - ONLINE_TTL_MS;
+  for (const [userId, tabs] of onlineUsers) {
+    for (const [tabId, lastSeen] of tabs) {
+      if (lastSeen < expiresBefore) tabs.delete(tabId);
+    }
+    if (tabs.size === 0) onlineUsers.delete(userId);
+  }
+}
+
+function onlineUsersCount() {
+  removeInactiveOnlineUsers();
+  return onlineUsers.size;
+}
+
+app.post('/api/online/heartbeat', authenticate, (req, res) => {
+  const clientId = typeof req.body?.clientId === 'string' ? req.body.clientId : '';
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(clientId)) {
+    return res.status(400).json({ error: 'Invalid client ID' });
+  }
+  let tabs = onlineUsers.get(req.userId);
+  if (!tabs) {
+    tabs = new Map();
+    onlineUsers.set(req.userId, tabs);
+  }
+  tabs.set(clientId, Date.now());
+  res.json({ online: onlineUsersCount() });
+});
+
+app.get('/api/online', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ online: onlineUsersCount() });
+});
+
+setInterval(removeInactiveOnlineUsers, 60 * 1000).unref();
+
+// ============ JAVASCRIPT ANTI-BOT CHALLENGE ============
+const pendingBotChallenges = new Map();
+const verifiedBotTokens = new Map();
+const BOT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const BOT_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const BOT_CHALLENGE_DIFFICULTY = 3;
+
+function cleanupBotChallenges() {
+  const now = Date.now();
+  for (const [id, item] of pendingBotChallenges) {
+    if (item.expiresAt < now) pendingBotChallenges.delete(id);
+  }
+  for (const [token, expiresAt] of verifiedBotTokens) {
+    if (expiresAt < now) verifiedBotTokens.delete(token);
+  }
+}
+
+app.get('/api/challenge', (req, res) => {
+  cleanupBotChallenges();
+  const id = crypto.randomBytes(18).toString('base64url');
+  const nonce = crypto.randomBytes(24).toString('base64url');
+  pendingBotChallenges.set(id, { nonce, expiresAt: Date.now() + BOT_CHALLENGE_TTL_MS });
+  res.set('Cache-Control', 'no-store');
+  res.json({ id, nonce, difficulty: BOT_CHALLENGE_DIFFICULTY });
+});
+
+app.post('/api/challenge/verify', (req, res) => {
+  cleanupBotChallenges();
+  const { id, answer } = req.body || {};
+  const item = typeof id === 'string' ? pendingBotChallenges.get(id) : null;
+  if (!item || typeof answer !== 'string' || !/^\d{1,12}$/.test(answer)) {
+    return res.status(400).json({ error: 'Invalid or expired challenge' });
+  }
+  const digest = crypto.createHash('sha256').update(`${item.nonce}:${answer}`).digest('hex');
+  if (!digest.startsWith('0'.repeat(BOT_CHALLENGE_DIFFICULTY))) {
+    return res.status(400).json({ error: 'Challenge verification failed' });
+  }
+  pendingBotChallenges.delete(id);
+  const token = crypto.randomBytes(32).toString('base64url');
+  verifiedBotTokens.set(token, Date.now() + BOT_VERIFICATION_TTL_MS);
+  res.cookie('bot_verified', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: BOT_VERIFICATION_TTL_MS
+  });
+  res.json({ verified: true });
+});
+
+function requireBotChallenge(req, res, next) {
+  cleanupBotChallenges();
+  const token = req.cookies?.bot_verified;
+  const expiresAt = token && verifiedBotTokens.get(token);
+  if (!expiresAt || expiresAt < Date.now()) {
+    return res.status(403).json({ error: 'Подтвердите, что вы не бот, и повторите попытку.' });
+  }
+  next();
+}
+
+setInterval(cleanupBotChallenges, 5 * 60 * 1000).unref();
 
 
 
@@ -2053,6 +2169,9 @@ app.get('/post', optionalAuth, async (req, res) => {
             `;
         }
         
+        // JSON is embedded into a script tag; escape '<' so post text cannot terminate it.
+        const safePostJson = JSON.stringify(post).replace(/</g, '\\u003c');
+
         // Build metadata HTML to inject
         const metadata = `
             <!-- Primary Meta Tags -->
@@ -2084,7 +2203,7 @@ app.get('/post', optionalAuth, async (req, res) => {
             <!-- Pass post data to JavaScript -->
             <script>
                 window.POST_ID = ${postId};
-                window.POST_DATA = ${JSON.stringify(post)};
+                window.POST_DATA = ${safePostJson};
                 window.BACKGROUND_IMAGE = ${backgroundImage ? JSON.stringify(backgroundImage) : 'null'};
             </script>
         `;
@@ -2117,7 +2236,7 @@ app.get('/new_community', (req, res) => {
 
 // ============ USER ROUTES ============
 
-app.post('/api/register', registrationLimiter, async (req, res) => {
+app.post('/api/register', requireBotChallenge, registrationLimiter, async (req, res) => {
   try {
     const { username, password, email } = req.body;
     
@@ -2314,7 +2433,7 @@ app.post('/api/resend-verification', accountEmailLimiter, async (req, res) => {
 });
 
 // Login endpoint
-app.post('/api/login', loginLimiter, async (req, res) => {
+app.post('/api/login', requireBotChallenge, loginLimiter, async (req, res) => {
   try {
     const { identifier, password } = req.body;
     

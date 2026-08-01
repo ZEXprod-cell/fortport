@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="icon" type="image/x-icon" href="https://fortport.ru/fortport.ico">
+    <title>ФортПорт - Создать порт</title>
+    <link rel="stylesheet" href="/style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">     
+<script>
+  function isMobile() {
+    return window.innerWidth <= 768 || 
+           /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  }
+  
+  if (isMobile()) {
+    window.location.href = "/mobile/register";
+  }
+</script>
+<style>
+        .auth-container {
+            min-width: 300px;
+            max-width: 300px;
+            margin-top: 150px;
+            margin-left: 170px;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 5px 10px 10px -5px rgba(0, 10, 90, 0.4);
+            border: 4px solid #cccfe0;
+            border-style: outset;
+            box-sizing: border-box;
+        }
+        
+        .auth-container h1 {
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 5px;
+            color: #15141c;
+            font-size: 26px;
+        }
+
+        .auth-container h3 {
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #333;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .auth-form input {
+            padding: 12px;
+            font-size: 15px;
+            border: 2px solid #bccee2;
+            border-radius: 8px;
+            background: #edeff4;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        
+        .auth-form button {
+            background-color: #bef1fc;
+            font-size: 18px;
+            border: none;
+            padding: 12px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin-top: 5px;
+            color: #15141c;
+            font-weight: normal;
+        }
+        
+        .auth-form button:hover {
+            background-color: #9fd9e8;
+        }
+        
+        .auth-form button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background-color: #e0e0e0;
+            color: #888;
+        }
+
+        .tg-box {
+            font-size: 12px;
+            color: #2c5282;
+            background: #eef8ff;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #bce1ff;
+            line-height: 1.3;
+        }
+
+        .tg-box a {
+            color: #0088cc;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        
+        .auth-link {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 15px;
+        }
+        
+        .auth-link a {
+            color: #2c5282;
+            text-decoration: none;
+        }
+        
+        .error {
+            color: #ff4444;
+            text-align: center;
+            font-size: 13px;
+            min-height: 18px;
+        }
+        
+        .success {
+            color: #44aa44;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin: 5px 0;
+        }
+        
+        .checkbox-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 13px;
+            color: #333;
+            cursor: pointer;
+        }
+        
+        .checkbox-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            margin-top: 1px;
+            accent-color: #4a9e9f;
+            cursor: pointer;
+        }
+
+        .toggle-alt {
+            text-align: center;
+            font-size: 13px;
+            color: #888;
+            cursor: pointer;
+            margin: 2px 0;
+            text-decoration: none;
+            display: block;
+            user-select: none;
+            position: relative;
+            z-index: 10;
+        }
+
+        .toggle-alt:hover {
+            color: #333;
+            text-decoration: underline;
+        }
+</style>
+    <script defer src="/scripts/bot-challenge.js"></script>
+</head>
+<body style="background-image: url('https://fortport.ru/reglogin_bg.webp'); background-position: center; background-size: cover; margin: 0; padding: 0;">
+    <div class="auth-container">
+        <h1>Новый порт</h1>
+        <h3>Регистрация по инвайтам</h3>
+        
+        <div id="error" class="error"></div>
+        <div id="success" class="success"></div>
+        
+        <!-- Registration Form -->
+        <form class="auth-form" id="register-form">
+            <!-- Step 1: Invite Code -->
+            <input type="text" id="invite-code" placeholder="ИНВАЙТ-КОД (FP-XXXXXX)" required style="text-transform: uppercase; letter-spacing: 0.5px;">
+
+            <!-- Step 2: User details -->
+            <div id="step2-fields" style="display: none; flex-direction: column; gap: 12px;">
+                <input type="text" id="username" placeholder="Имя пользователя" autocomplete="off">
+                <input type="email" id="email" placeholder="Email" autocomplete="off">
+                <input type="password" id="password" placeholder="Пароль" autocomplete="off">
+                
+                <div class="tg-box">
+                    🤖 Бот <a href="https://t.me/FortPortBot" target="_blank">@FortPortBot</a> — команда <code>/start</code>
+                </div>
+                <input type="text" id="telegram-code" placeholder="Код из Telegram бота">
+            </div>
+            
+            <div class="checkbox-group">
+                <label class="checkbox-item">
+                    <input type="checkbox" id="agree-terms">
+                    <span>Я принимаю <a href="/terms" target="_blank" style="color:#2c5282;">Условия использования</a></span>
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="agree-privacy">
+                    <span>Я принимаю <a href="/privacy" target="_blank" style="color:#2c5282;">Политику конфиденциальности</a></span>
+                </label>
+            </div>
+            
+            <a id="toggle-alt-btn" href="javascript:void(0)" class="toggle-alt">другой способ</a>
+
+            <button type="submit" id="register-btn" disabled>Зарегистрироваться</button>
+        </form>
+        
+        <div class="auth-link">
+            Уже есть аккаунт? <a href="/login" style="color: #2c5282;">Войти</a>
+        </div>
+    </div>
+    
+    <script type="module" src="/scripts/register.js"></script>
+  <script src="/scripts/online-counter.js"></script>
+</body>
+</html>

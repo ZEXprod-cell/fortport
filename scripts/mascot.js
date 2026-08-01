@@ -477,7 +477,6 @@ function applyMascotDock(mascot, dock, persist = true, preview = false) {
     mascot.classList.toggle('mascot-dock-bottom', edge === 'bottom');
     mascot.classList.toggle('mascot-facing-left', edge === 'bottom' && offset > 0.5);
     mascot.classList.toggle('mascot-facing-right', edge === 'bottom' && offset <= 0.5);
-    mascot.classList.toggle('mascot-dock-preview', preview);
     mascot.style.right = 'auto';
     mascot.style.transform = 'none';
 
@@ -549,6 +548,8 @@ function attachMascotInteractions(mascot, video) {
     let moved = false;
     let headPetting = false;
     let lastPetX = 0;
+    let lastPointerX = 0;
+    let lastPointerY = 0;
     let lastDirection = 0;
     let directionChanges = 0;
     let horizontalTravel = 0;
@@ -571,6 +572,8 @@ function attachMascotInteractions(mascot, video) {
         pointerId = event.pointerId;
         startPointerX = event.clientX;
         startPointerY = event.clientY;
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
         startLeft = rect.left;
         startTop = rect.top;
         moved = false;
@@ -615,30 +618,72 @@ function attachMascotInteractions(mascot, video) {
         headPetting = false;
         mascot.classList.add('mascot-dragging');
 
-        // The mascot clings to walls: standing upright on the floor with the
-        // bottom of its video glued to the bottom edge; near the side edges it
-        // rotates 90deg with its feet flush against the wall, at the bottom
-        // part of the wall (right-bottom / left-bottom). No drag highlights.
+        // Incremental pointer travel (smooth, no jumps between modes)
+        const stepX = event.clientX - lastPointerX;
+        const stepY = event.clientY - lastPointerY;
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+
         const edgeSize = window.innerWidth <= 830 ? 72 : 96;
         const x = Math.max(0, Math.min(event.clientX, window.innerWidth));
-        let edge = 'bottom';
-        if (x <= edgeSize) edge = 'left';
-        else if (x >= window.innerWidth - edgeSize) edge = 'right';
+        const y = Math.max(0, Math.min(event.clientY, window.innerHeight));
 
-        if (edge === 'left' || edge === 'right') {
-            dockCandidate = { edge, offset: 1 };
+        if (x <= edgeSize) {
+            // Left wall: rotate 90deg, cling to the wall, slide vertically
+            dockCandidate = { edge: 'left', offset: y / Math.max(1, window.innerHeight) };
+            applyMascotDock(mascot, dockCandidate, false, true);
+        } else if (x >= window.innerWidth - edgeSize) {
+            // Right wall: rotate 90deg, cling to the wall, slide vertically
+            dockCandidate = { edge: 'right', offset: y / Math.max(1, window.innerHeight) };
+            applyMascotDock(mascot, dockCandidate, false, true);
         } else {
-            dockCandidate = { edge: 'bottom', offset: x / Math.max(1, window.innerWidth) };
+            // Middle of the screen: free 2D movement, upright
+            dockCandidate = null;
+            const r = mascot.getBoundingClientRect();
+            const w = r.width || (window.innerWidth <= 830 ? 90 : 160);
+            const h = r.height || (window.innerWidth <= 830 ? 124 : 220);
+            const nLeft = Math.max(0, Math.min(r.left + stepX, window.innerWidth - w));
+            const nTop = Math.max(0, Math.min(r.top + stepY, window.innerHeight - h));
+            mascot.style.left = `${nLeft}px`;
+            mascot.style.top = `${nTop}px`;
+            mascot.style.right = 'auto';
+            mascot.style.bottom = 'auto';
+            mascot.style.transform = 'none';
+            mascot.classList.remove(
+                'mascot-dock-left',
+                'mascot-dock-right',
+                'mascot-dock-bottom',
+                'mascot-facing-left',
+                'mascot-facing-right'
+            );
         }
-        applyMascotDock(mascot, dockCandidate, false, true);
     });
 
     const finishPointer = (event) => {
         if (event.pointerId !== pointerId) return;
         if (mascot.hasPointerCapture(pointerId)) mascot.releasePointerCapture(pointerId);
-        mascot.classList.remove('mascot-dragging', 'mascot-dock-preview');
+        mascot.classList.remove('mascot-dragging');
         if (dragging) {
-            applyMascotDock(mascot, dockCandidate || getStoredMascotDock());
+            if (dockCandidate) {
+                // Dropped while clinging to a wall: keep that wall position
+                applyMascotDock(mascot, dockCandidate);
+            } else {
+                // Dropped in free space: cling to the nearest surface with
+                // the bottom of the video flush against it (floor or wall)
+                const r = mascot.getBoundingClientRect();
+                const cx = r.left + r.width / 2;
+                const edgeSize = window.innerWidth <= 830 ? 72 : 96;
+                if (r.left <= edgeSize) {
+                    applyMascotDock(mascot, { edge: 'left', offset: 1 });
+                } else if (r.right >= window.innerWidth - edgeSize) {
+                    applyMascotDock(mascot, { edge: 'right', offset: 1 });
+                } else {
+                    applyMascotDock(mascot, {
+                        edge: 'bottom',
+                        offset: Math.max(0, Math.min(1, cx / Math.max(1, window.innerWidth)))
+                    });
+                }
+            }
         }
         if (moved) {
             mascot.dataset.suppressClick = '1';
