@@ -1013,19 +1013,20 @@ img {
 /* Mascot container - fixed position at bottom right */
 .mascot-dummy {
     position: fixed;
-    bottom: 0;
-    right: 25%;
-    transform: translateX(50%);
+    bottom: 0;          /* zero position = bottom pixels */
+    right: 0;
+    transform: none;
     z-index: 998;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: flex-end;
     cursor: grab;
     pointer-events: auto;
     touch-action: none;
     user-select: none;
-    width: 180px;
-    height: 180px;
+    width: 160px;       /* matches mascot video aspect (626x862) */
+    height: 220px;
 }
 
 .mascot-dummy.mascot-dragging {
@@ -1037,89 +1038,30 @@ img {
 .mascot-dummy.mascot-dock-right,
 .mascot-dummy.mascot-dock-bottom {
     right: auto;
-    bottom: auto;
     transform: none;
 }
 
+/* Side docks: rotate the mascot 90deg so it clings to the side edge
+   (the rotated video overhangs the container; JS offsets compensate it) */
 .mascot-dummy.mascot-dock-left .mascot-video {
-    transform: translateX(-50px) rotate(90deg);
+    transform: rotate(90deg);
     transform-origin: center;
 }
 
 .mascot-dummy.mascot-dock-right .mascot-video {
-    transform: translateX(50px) rotate(-90deg);
+    transform: rotate(-90deg);
     transform-origin: center;
 }
 
-.mascot-dummy.mascot-dock-bottom.mascot-facing-right .mascot-video {
-    transform: translateY(50px) scaleX(-1);
+/* Bottom dock: stands upright on the bottom pixels */
+.mascot-dummy.mascot-dock-bottom .mascot-video {
+    transform: none;
 }
-
 .mascot-dummy.mascot-dock-bottom.mascot-facing-left .mascot-video {
-    transform: translateY(50px) scaleX(1);
+    transform: none;
 }
-
-.mascot-dummy.mascot-dock-preview .mascot-video {
-    filter: drop-shadow(0 0 16px rgba(74, 199, 255, 0.95)) brightness(1.08);
-}
-
-.mascot-dock-zones {
-    position: fixed;
-    inset: 0;
-    z-index: 997;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.16s ease;
-}
-
-.mascot-dock-zones-visible {
-    opacity: 1;
-}
-
-.mascot-dock-zone {
-    position: absolute;
-    border: 2px dashed rgba(73, 181, 235, 0.68);
-    box-shadow: inset 0 0 30px rgba(72, 186, 238, 0.18);
-    transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
-}
-
-.mascot-dock-zone-left,
-.mascot-dock-zone-right {
-    top: 0;
-    bottom: 0;
-    width: 96px;
-    background: linear-gradient(to right, rgba(104, 208, 255, 0.34), rgba(104, 208, 255, 0.04));
-}
-
-.mascot-dock-zone-left {
-    left: 0;
-    border-left: 0;
-    border-radius: 0 24px 24px 0;
-}
-
-.mascot-dock-zone-right {
-    right: 0;
-    border-right: 0;
-    border-radius: 24px 0 0 24px;
-    background: linear-gradient(to left, rgba(104, 208, 255, 0.34), rgba(104, 208, 255, 0.04));
-}
-
-.mascot-dock-zone-bottom {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 96px;
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 24px 24px 0 0;
-    background: linear-gradient(to top, rgba(104, 208, 255, 0.34), rgba(104, 208, 255, 0.04));
-}
-
-.mascot-dock-zone-active {
-    border-color: rgba(36, 158, 226, 1);
-    background: linear-gradient(to top, rgba(104, 208, 255, 0.72), rgba(104, 208, 255, 0.16));
-    box-shadow: inset 0 0 46px rgba(42, 174, 235, 0.48), 0 0 20px rgba(42, 174, 235, 0.28);
+.mascot-dummy.mascot-dock-bottom.mascot-facing-right .mascot-video {
+    transform: scaleX(-1);
 }
 
 .mascot-being-petted .mascot-video {
@@ -1128,8 +1070,8 @@ img {
 
 /* Mascot video itself */
 .mascot-video {
-    height: 180px;
-    width: 180px;
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     pointer-events: none;
     user-select: none;
@@ -8682,32 +8624,27 @@ padding:15px;
         bottom: 170px;
 	}
 	.mascot-dummy{
-	width:100px;
-	height:100px;
+	width:90px;
+	height:124px;
 	}
     .mascot-dummy.mascot-dock-left .mascot-video {
-        transform: translateX(-28px) rotate(90deg);
+        transform: rotate(90deg);
+        transform-origin: center;
     }
     .mascot-dummy.mascot-dock-right .mascot-video {
-        transform: translateX(28px) rotate(-90deg);
+        transform: rotate(-90deg);
+        transform-origin: center;
+    }
+    .mascot-dummy.mascot-dock-bottom .mascot-video {
+        transform: none;
     }
     .mascot-dummy.mascot-dock-bottom.mascot-facing-right .mascot-video {
-        transform: translateY(28px) scaleX(-1);
-    }
-    .mascot-dummy.mascot-dock-bottom.mascot-facing-left .mascot-video {
-        transform: translateY(28px) scaleX(1);
+        transform: scaleX(-1);
     }
 	.mascot-video{
-	width:100px;
-	height:100px;
+	width:100%;
+	height:100%;
 	}
-    .mascot-dock-zone-left,
-    .mascot-dock-zone-right {
-        width: 72px;
-    }
-    .mascot-dock-zone-bottom {
-        height: 72px;
-    }
 	.comment-attachment-video {
 	max-width:160px;
 	}

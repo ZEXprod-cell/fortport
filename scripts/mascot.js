@@ -428,8 +428,8 @@ let currentVideoPath = '';
 
 function clampMascotPosition(mascot, left, top) {
     const rect = mascot.getBoundingClientRect();
-    const width = rect.width || 180;
-    const height = rect.height || 180;
+    const width = rect.width || 160;
+    const height = rect.height || 220;
     return {
         left: Math.max(0, Math.min(left, window.innerWidth - width)),
         top: Math.max(0, Math.min(top, window.innerHeight - height))
@@ -463,11 +463,11 @@ function getStoredMascotDock() {
         }
     } catch {}
 
-    return { edge: 'right', offset: 1 };
+    return { edge: 'bottom', offset: 1 };
 }
 
 function applyMascotDock(mascot, dock, persist = true, preview = false) {
-    const edge = ['left', 'right', 'bottom'].includes(dock?.edge) ? dock.edge : 'right';
+    const edge = ['left', 'right', 'bottom'].includes(dock?.edge) ? dock.edge : 'bottom';
     const offset = Math.max(0, Math.min(Number(dock?.offset) || 0, 1));
 
     mascot.dataset.dockEdge = edge;
@@ -475,25 +475,30 @@ function applyMascotDock(mascot, dock, persist = true, preview = false) {
     mascot.classList.toggle('mascot-dock-left', edge === 'left');
     mascot.classList.toggle('mascot-dock-right', edge === 'right');
     mascot.classList.toggle('mascot-dock-bottom', edge === 'bottom');
-    mascot.classList.toggle('mascot-facing-left', edge === 'right' || (edge === 'bottom' && offset > 0.5));
-    mascot.classList.toggle('mascot-facing-right', edge === 'left' || (edge === 'bottom' && offset <= 0.5));
+    mascot.classList.toggle('mascot-facing-left', edge === 'bottom' && offset > 0.5);
+    mascot.classList.toggle('mascot-facing-right', edge === 'bottom' && offset <= 0.5);
     mascot.classList.toggle('mascot-dock-preview', preview);
     mascot.style.right = 'auto';
-    mascot.style.bottom = 'auto';
     mascot.style.transform = 'none';
 
     const rect = mascot.getBoundingClientRect();
-    const width = rect.width || (window.innerWidth <= 830 ? 100 : 180);
-    const height = rect.height || (window.innerWidth <= 830 ? 100 : 180);
-    const maxLeft = Math.max(0, window.innerWidth - width);
-    const maxTop = Math.max(0, window.innerHeight - height);
+    const w = rect.width || (window.innerWidth <= 830 ? 90 : 160);
+    const h = rect.height || (window.innerWidth <= 830 ? 124 : 220);
+    const dx = (h - w) / 2; // overhang of the 90deg-rotated video (side docks)
 
     if (edge === 'left' || edge === 'right') {
-        mascot.style.left = edge === 'left' ? '0px' : `${maxLeft}px`;
-        mascot.style.top = `${Math.round(maxTop * offset)}px`;
+        // Side dock: mascot rotates 90deg and clings to the side edge,
+        // its vertical position along the edge follows the offset.
+        mascot.style.left = edge === 'left'
+            ? `${dx}px`
+            : `${Math.round(window.innerWidth - h + dx)}px`;
+        mascot.style.top = `${Math.round((window.innerHeight - w) * offset - dx)}px`;
+        mascot.style.bottom = 'auto';
     } else {
-        mascot.style.left = `${Math.round(maxLeft * offset)}px`;
-        mascot.style.top = `${maxTop}px`;
+        // Bottom dock: zero position = bottom pixels
+        mascot.style.left = `${Math.round((window.innerWidth - w) * offset)}px`;
+        mascot.style.top = 'auto';
+        mascot.style.bottom = '0px';
     }
 
     if (persist) {
@@ -506,57 +511,6 @@ function applyMascotDock(mascot, dock, persist = true, preview = false) {
 
 function restoreMascotPosition(mascot) {
     applyMascotDock(mascot, getStoredMascotDock(), false);
-}
-
-function createMascotDockZones() {
-    let layer = document.querySelector('.mascot-dock-zones');
-    if (layer) return layer;
-
-    layer = document.createElement('div');
-    layer.className = 'mascot-dock-zones';
-    layer.setAttribute('aria-hidden', 'true');
-
-    ['left', 'right', 'bottom'].forEach(edge => {
-        const zone = document.createElement('div');
-        zone.className = `mascot-dock-zone mascot-dock-zone-${edge}`;
-        zone.dataset.dockEdge = edge;
-        layer.appendChild(zone);
-    });
-
-    document.body.appendChild(layer);
-    return layer;
-}
-
-function getMascotDockCandidate(clientX, clientY) {
-    const edgeSize = window.innerWidth <= 830 ? 72 : 96;
-    const safeX = Math.max(0, Math.min(clientX, window.innerWidth));
-    const safeY = Math.max(0, Math.min(clientY, window.innerHeight));
-
-    if (safeY >= window.innerHeight - edgeSize) {
-        return {
-            edge: 'bottom',
-            offset: safeX / Math.max(1, window.innerWidth)
-        };
-    }
-    if (safeX <= edgeSize) {
-        return {
-            edge: 'left',
-            offset: safeY / Math.max(1, window.innerHeight)
-        };
-    }
-    if (safeX >= window.innerWidth - edgeSize) {
-        return {
-            edge: 'right',
-            offset: safeY / Math.max(1, window.innerHeight)
-        };
-    }
-    return null;
-}
-
-function setMascotDockZoneState(layer, candidate) {
-    layer?.querySelectorAll('.mascot-dock-zone').forEach(zone => {
-        zone.classList.toggle('mascot-dock-zone-active', zone.dataset.dockEdge === candidate?.edge);
-    });
 }
 
 function schedulePettingRecordSave(record) {
@@ -599,7 +553,6 @@ function attachMascotInteractions(mascot, video) {
     let directionChanges = 0;
     let horizontalTravel = 0;
     let dockCandidate = null;
-    const dockZones = createMascotDockZones();
 
     const completePettingCycle = () => {
         pettingCount += 1;
@@ -628,7 +581,6 @@ function attachMascotInteractions(mascot, video) {
         directionChanges = 0;
         horizontalTravel = 0;
         dockCandidate = null;
-        setMascotDockZoneState(dockZones, null);
         mascot.setPointerCapture(pointerId);
     });
 
@@ -662,37 +614,29 @@ function attachMascotInteractions(mascot, video) {
         moved = true;
         headPetting = false;
         mascot.classList.add('mascot-dragging');
-        dockZones.classList.add('mascot-dock-zones-visible');
 
-        const position = clampMascotPosition(mascot, startLeft + deltaX, startTop + deltaY);
-        mascot.style.left = `${position.left}px`;
-        mascot.style.top = `${position.top}px`;
-        mascot.style.right = 'auto';
-        mascot.style.bottom = 'auto';
-        mascot.style.transform = 'none';
+        // The mascot clings to walls: standing upright on the floor with the
+        // bottom of its video glued to the bottom edge; near the side edges it
+        // rotates 90deg with its feet flush against the wall, at the bottom
+        // part of the wall (right-bottom / left-bottom). No drag highlights.
+        const edgeSize = window.innerWidth <= 830 ? 72 : 96;
+        const x = Math.max(0, Math.min(event.clientX, window.innerWidth));
+        let edge = 'bottom';
+        if (x <= edgeSize) edge = 'left';
+        else if (x >= window.innerWidth - edgeSize) edge = 'right';
 
-        dockCandidate = getMascotDockCandidate(event.clientX, event.clientY);
-        setMascotDockZoneState(dockZones, dockCandidate);
-        if (dockCandidate) {
-            applyMascotDock(mascot, dockCandidate, false, true);
+        if (edge === 'left' || edge === 'right') {
+            dockCandidate = { edge, offset: 1 };
         } else {
-            mascot.classList.remove(
-                'mascot-dock-preview',
-                'mascot-dock-left',
-                'mascot-dock-right',
-                'mascot-dock-bottom',
-                'mascot-facing-left',
-                'mascot-facing-right'
-            );
+            dockCandidate = { edge: 'bottom', offset: x / Math.max(1, window.innerWidth) };
         }
+        applyMascotDock(mascot, dockCandidate, false, true);
     });
 
     const finishPointer = (event) => {
         if (event.pointerId !== pointerId) return;
         if (mascot.hasPointerCapture(pointerId)) mascot.releasePointerCapture(pointerId);
         mascot.classList.remove('mascot-dragging', 'mascot-dock-preview');
-        dockZones.classList.remove('mascot-dock-zones-visible');
-        setMascotDockZoneState(dockZones, null);
         if (dragging) {
             applyMascotDock(mascot, dockCandidate || getStoredMascotDock());
         }
@@ -739,8 +683,8 @@ function updateVideo(emotionCode) {
     preload.src = src;
     preload.preload = 'auto';
     preload.muted = true;
-    preload.style.width = '180px';
-    preload.style.height = '180px';
+    preload.style.width = '160px';
+    preload.style.height = '220px';
     preload.style.objectFit = 'cover';
     preload.style.position = 'fixed';
     preload.style.opacity = '0';
