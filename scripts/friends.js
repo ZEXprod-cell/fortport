@@ -22,12 +22,13 @@ document.addEventListener('DOMContentLoaded', function() {
         viewingUserId = currentUserId ? parseInt(currentUserId) : null
     }
     
-    setupSearch()
+
+    if (window.location.pathname.includes('/profile') || window.location.pathname.includes('/friends')) {
     loadFriendsData(viewingUserId)
-    // REMOVE THIS - it clears the badge right after it's set
-    // clearFriendNotifications()
+	}
     
     if (window.location.pathname.includes('/friends')) {
+	setupSearch()
         fetch(`/api/users/bio/${viewingUserId}`)
             .then(r => r.json())
             .then(userBio => {
@@ -42,7 +43,6 @@ document.addEventListener('DOMContentLoaded', function() {
 function setupSearch() {
     if (!searchInput) return
     
-    // Only show search if viewing own profile
     const currentUserId = localStorage.getItem('userId')
     if (viewingUserId && viewingUserId !== parseInt(currentUserId)) {
         searchInput.style.display = 'none'
@@ -97,6 +97,14 @@ function exitSearchMode() {
     if (searchInput) searchInput.value = ''
 }
 
+function developerBadgeHtml(user) {
+    return window.FortPortRoles?.badgeHtml(user, { compact: true }) || ''
+}
+
+function roleNameClasses(user) {
+    return `friend-card-name${user?.displayRole ? ` role-name role-name-${user.displayRole}` : ''}`
+}
+
 function displaySearchResults(users) {
     const container = document.getElementById('user-search-list')
     if (!container) return
@@ -123,7 +131,10 @@ function displaySearchResults(users) {
         userCard.innerHTML = `
             <img src="${user.profilePicture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
             <div class="friend-card-info">
-                <a href="/profile?id=${user.id}" class="friend-card-name">${escapeHtml(user.username)}</a>
+                <div class="friend-card-name-row">
+                    <a href="/profile?id=${user.id}" class="${roleNameClasses(user)}">${escapeHtml(user.username)}</a>
+                    ${developerBadgeHtml(user)}
+                </div>
                 <span class="friend-card-type">${user.status ? user.status : ''}</span>
             </div>
             <div class="friends-page-buttons">
@@ -255,7 +266,10 @@ function displayFriends(friends, showButtons = true) {
         friendCard.innerHTML = `
             <img src="${friend.profilePicture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
             <div class="friend-card-info">
-                <a href="/profile?id=${friend.id}" class="friend-card-name">${escapeHtml(friend.username)}</a>
+                <div class="friend-card-name-row">
+                    <a href="/profile?id=${friend.id}" class="${roleNameClasses(friend)}">${escapeHtml(friend.username)}</a>
+                    ${developerBadgeHtml(friend)}
+                </div>
                 <span class="friend-card-type">${friend.status ? friend.status : ''}</span>
             </div>
             ${buttonsHtml}
@@ -290,7 +304,10 @@ function displayPending(pending, showButtons = true) {
         requestCard.innerHTML = `
             <img src="${requester.profilePicture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
             <div class="friend-card-info">
-                <a href="/profile?id=${requester.id}" class="friend-card-name">${escapeHtml(requester.username)}</a>
+                <div class="friend-card-name-row">
+                    <a href="/profile?id=${requester.id}" class="${roleNameClasses(requester)}">${escapeHtml(requester.username)}</a>
+                    ${developerBadgeHtml(requester)}
+                </div>
                 <span class="friend-card-status">Хочет подключиться к вам в друзья</span>
             </div>
             ${buttonsHtml}
@@ -306,10 +323,8 @@ function acceptRequest(requesterUserId) {
     fetch('/api/friends/accept', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            currentUserId: parseInt(currentUserId),
-            requesterUserId: requesterUserId
-        })
+        credentials: 'same-origin',
+        body: JSON.stringify({ requesterUserId: requesterUserId })
     })
     .then(r => r.json())
     .then(data => {
@@ -326,10 +341,8 @@ function rejectRequest(requesterUserId) {
     fetch('/api/friends/reject', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            currentUserId: parseInt(currentUserId),
-            requesterUserId: requesterUserId
-        })
+        credentials: 'same-origin',
+        body: JSON.stringify({ requesterUserId: requesterUserId })
     })
     .then(r => r.json())
     .then(data => {
@@ -347,10 +360,8 @@ function sendFriendRequest(toUserId) {
     fetch('/api/friends/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            fromUserId: parseInt(fromUserId),
-            toUserId: toUserId
-        })
+        credentials: 'same-origin',
+        body: JSON.stringify({ toUserId: toUserId })
     })
     .then(r => r.json())
     .then(data => {
@@ -370,9 +381,9 @@ function removeFriend(friendUserId) {
     
     fetch('/api/friends/remove', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            currentUserId: parseInt(currentUserId),
             friendId: friendUserId
         })
     })
@@ -386,14 +397,9 @@ function removeFriend(friendUserId) {
 }
 
 function messageFriend(friendUserId) {
-    if (typeof window.toggleChatsPanel === 'function') {
-        window.toggleChatsPanel()
-        setTimeout(() => {
-            if (typeof window.openChatWithUser === 'function') {
-                window.openChatWithUser(friendUserId)
-            }
-        }, 100)
-    }
+    const userId = Number(friendUserId)
+    if (!Number.isSafeInteger(userId)) return
+    window.location.href = `/chats?id=${encodeURIComponent(userId)}`
 }
 
 function updateFriendsBadge(count) {

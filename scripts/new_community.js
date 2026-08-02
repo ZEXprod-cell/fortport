@@ -6,7 +6,7 @@ document.getElementById('register-form').addEventListener('submit', async functi
     const rules = document.getElementById('rules').value.trim()
     const description = document.getElementById('description').value.trim()
     const profilePic = document.getElementById('profile-pic-input').files[0]
-    const createdBy = localStorage.getItem('username')
+    const isLoggedIn = localStorage.getItem('sessionValid') === 'true'
     
     const errorDiv = document.getElementById('error')
     const successDiv = document.getElementById('success')
@@ -20,14 +20,13 @@ document.getElementById('register-form').addEventListener('submit', async functi
         return
     }
     
-    if (!createdBy) {
+    if (!isLoggedIn) {
         errorDiv.textContent = 'Необходимо войти в систему'
         return
     }
     
     const formData = new FormData()
     formData.append('username', username)
-    formData.append('createdBy', createdBy)
     formData.append('type', type)
     formData.append('rules', rules)
     formData.append('description', description)
@@ -38,6 +37,7 @@ document.getElementById('register-form').addEventListener('submit', async functi
     try {
         const response = await fetch('/communities/new', {
             method: 'POST',
+            credentials: 'same-origin',
             body: formData
         })
         
@@ -46,7 +46,7 @@ document.getElementById('register-form').addEventListener('submit', async functi
         if (data.success) {
             successDiv.textContent = 'Порт успешно создан! Перенаправляем...'
             setTimeout(() => {
-                window.location.href = `/community.html?id=${data.comm.id}`
+                window.location.href = `/community?id=${data.comm.id}`
             }, 1500)
         } else {
             errorDiv.textContent = data.error || 'Ошибка при создании порта'

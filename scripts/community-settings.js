@@ -2,6 +2,15 @@
 let currentCommunityId = null;
 let currentCommunityData = null;
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Get community ID from URL
 const urlParams = new URLSearchParams(window.location.search);
 currentCommunityId = urlParams.get('id');
@@ -12,8 +21,11 @@ if (!currentCommunityId) {
 
 async function loadCommunitySettings() {
     try {
-        const response = await fetch(`/api/community/${currentCommunityId}/settings`);
+        const response = await fetch(`/api/community/${currentCommunityId}/settings`, {
+            credentials: 'same-origin'
+        });
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не удалось загрузить настройки порта');
         currentCommunityData = data;
         
         // General tab
@@ -72,11 +84,18 @@ function createUserCard(user, role) {
     card.setAttribute('data-user-id', user.id);
     card.style.position= 'relative'
     
+    const displayRole = window.FortPortRoles?.resolveRole(user);
+    const displayRoleClass = displayRole ? ` role-name role-name-${displayRole}` : '';
+    const badge = window.FortPortRoles?.badgeHtml(user, { compact: true }) || '';
+
     card.innerHTML = `
-        <img src="${user.profile_picture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
+        <img src="${escapeHtml(user.profile_picture || '/default-avatar.jpg')}" class="friend-card-avatar frutiger-aero-border" alt="">
         <div class="friend-card-info">
-            <a href="/profile.html?id=${user.id}" class="friend-card-name">${user.username}</a>
-            <span class="friend-card-status">${role === 'moderator' ? 'Модератор' : 'Подписчик'}</span>
+            <div class="friend-card-name-row">
+                <a href="/profile?id=${encodeURIComponent(user.id)}" class="friend-card-name${displayRoleClass}">${escapeHtml(user.username)}</a>
+                ${badge}
+            </div>
+            <span class="friend-card-status">${role === 'moderator' ? 'Модератор порта' : 'Подписчик'}</span>
         </div>
         <div style="display: flex; gap: 8px;">
             ${role !== 'moderator' ? `<button class="promote-btn" style="position:absolute; right:5px; bottom:5px;" onclick="promoteToModerator(${user.id})">Назначить модератором</button>` : ''}
@@ -219,7 +238,11 @@ function switchSettingsTab(evt, tab) {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
-    loadCommunitySettings();
+    if (window.FortPortRoles) {
+        loadCommunitySettings();
+    } else {
+        window.addEventListener('fortport:roles-ready', loadCommunitySettings, { once: true });
+    }
     
     // Profile picture click handler
     document.getElementById('community-pfp').addEventListener('click', () => {

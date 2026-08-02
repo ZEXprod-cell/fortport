@@ -88,17 +88,16 @@ function verifyToken(token) {
 
 // Send verification email
 async function sendVerificationEmail(email, username, token, req = null) {
-    let baseUrl = process.env.BASE_URL;
+    let baseUrl;
     
-    if (!baseUrl) {
-        if (req) {
-            const host = req.headers['host'] || 'localhost:3000';
-            const safeHost = host.replace(/[^a-zA-Z0-9.:-]/g, '');
-            const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-            baseUrl = `${protocol}://${safeHost}`;
-        } else {
-            baseUrl = 'http://localhost:3000';
-        }
+    if (req) {
+        // Use request headers if available
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+        const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+        baseUrl = `${protocol}://${host}`;
+    } else {
+        // Fallback to environment variable or localhost
+        baseUrl = process.env.BASE_URL || 'http://localhost:3000';
     }
     
     const verificationLink = `${baseUrl}/api/verify-email?token=${token}`;

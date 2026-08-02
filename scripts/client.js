@@ -30,27 +30,45 @@ function closeLightbox() {
   document.body.style.overflow = ''
 }
 
-function openLightbox(imagePath, mediaItems = null) {
+function openLightbox(imageSource, mediaItems = null) {
   lightbox.style.display = 'flex'
   document.body.style.overflow = 'hidden'
   
   lightbox.innerHTML = ''
-  
-  const hasMultiple = mediaItems && mediaItems.length > 1;
-  const currentPath = imagePath;
-  let currentPhotoId = null;
-  let currentPhotoData = null;
-  let currentIndex = 0;
-  
-  const pathMatch = currentPath.match(/\/photo\/(\d+)/);
-  if (pathMatch) {
-    currentPhotoId = parseInt(pathMatch[1]);
+
+  const normalizeMediaItem = (item) => {
+    if (typeof item === 'string') {
+      const pathPhotoId = item.match(/^\/photo\/(\d+)/)?.[1]
+      return {
+        path: item,
+        type: 'image',
+        mediaId: pathPhotoId ? Number(pathPhotoId) : null
+      }
+    }
+
+    const path = item?.path || item?.url || ''
+    const pathPhotoId = path.match(/^\/photo\/(\d+)/)?.[1]
+    return {
+      ...item,
+      path,
+      type: item?.type || 'image',
+      mediaId: item?.mediaId || item?.photoId || (pathPhotoId ? Number(pathPhotoId) : null)
+    }
   }
-  
-  if (hasMultiple) {
-    currentIndex = mediaItems.findIndex(item => item.path === currentPath);
-    if (currentIndex === -1) currentIndex = 0;
-  }
+
+  const initialItem = normalizeMediaItem(imageSource)
+  const normalizedMediaItems = Array.isArray(mediaItems) && mediaItems.length
+    ? mediaItems.map(normalizeMediaItem)
+    : [initialItem]
+  const hasMultiple = normalizedMediaItems.length > 1
+  const currentPath = initialItem.path
+  let currentPhotoId = initialItem.mediaId || null
+  let currentPhotoData = null
+  let currentIndex = normalizedMediaItems.findIndex(item => {
+    if (currentPhotoId && item.mediaId) return Number(item.mediaId) === Number(currentPhotoId)
+    return item.path === currentPath
+  })
+  if (currentIndex === -1) currentIndex = 0
   
   const lightboxContent = document.createElement('div');
   lightboxContent.classList.add('lightbox-content');
@@ -72,8 +90,11 @@ function openLightbox(imagePath, mediaItems = null) {
   mediaContainer.classList.add('lightbox-media-container');
   
   function updateMedia(index) {
-    mediaContainer.innerHTML = '';
-    const item = mediaItems ? mediaItems[index] : { path: currentPath, type: 'image' };
+    mediaContainer.innerHTML = ''
+    currentIndex = index
+    const item = normalizedMediaItems[index]
+    currentPhotoId = item.mediaId || null
+    currentPhotoData = null
     
     if (item.type === 'image' || item.type === 'gif') {
       const img = document.createElement('img');
@@ -89,20 +110,23 @@ function openLightbox(imagePath, mediaItems = null) {
       mediaContainer.appendChild(video);
     }
     
-    const pathMatch2 = item.path.match(/\/photo\/(\d+)/);
-    if (pathMatch2) {
-      currentPhotoId = parseInt(pathMatch2[1]);
-      fetch(`/api/photo/${currentPhotoId}`)
-        .then(r => r.json())
-        .then(data => {
-          currentPhotoData = data;
-          updateFooter(data);
+    resetFooterForMedia(item)
+
+    if (currentPhotoId) {
+      fetch(`/api/photo/${currentPhotoId}`, { credentials: 'same-origin' })
+        .then(r => {
+          if (!r.ok) throw new Error('Photo metadata unavailable')
+          return r.json()
         })
-        .catch(err => console.error('Failed to fetch photo metadata:', err));
+        .then(data => {
+          currentPhotoData = data
+          updateFooter(data)
+        })
+        .catch(err => console.error('Failed to fetch photo metadata:', err))
     }
     
     if (counter) {
-      counter.textContent = `${index + 1} / ${mediaItems.length}`;
+      counter.textContent = `${index + 1} / ${normalizedMediaItems.length}`
     }
   }
   
@@ -116,7 +140,7 @@ function openLightbox(imagePath, mediaItems = null) {
     prevBtn.innerHTML = '←';
     prevBtn.onclick = function(e) {
       e.stopPropagation();
-      currentIndex = (currentIndex - 1 + mediaItems.length) % mediaItems.length;
+      currentIndex = (currentIndex - 1 + normalizedMediaItems.length) % normalizedMediaItems.length;
       updateMedia(currentIndex);
     };
     lightboxContent.appendChild(prevBtn);
@@ -126,24 +150,15 @@ function openLightbox(imagePath, mediaItems = null) {
     nextBtn.innerHTML = '→';
     nextBtn.onclick = function(e) {
       e.stopPropagation();
-      currentIndex = (currentIndex + 1) % mediaItems.length;
+      currentIndex = (currentIndex + 1) % normalizedMediaItems.length;
       updateMedia(currentIndex);
     };
     lightboxContent.appendChild(nextBtn);
     
     counter = document.createElement('div');
     counter.classList.add('lightbox-counter');
-    counter.textContent = `${currentIndex + 1} / ${mediaItems.length}`;
+    counter.textContent = `${currentIndex + 1} / ${normalizedMediaItems.length}`;
     lightboxContent.appendChild(counter);
-  }
-  
-  if (hasMultiple) {
-    updateMedia(currentIndex);
-  } else {
-    const img = document.createElement('img');
-    img.src = currentPath;
-    img.classList.add('lightbox-single-img');
-    mediaContainer.appendChild(img);
   }
   
   mediaDisplay.appendChild(mediaContainer);
@@ -179,10 +194,13 @@ function openLightbox(imagePath, mediaItems = null) {
   const userInfo = document.createElement('div');
   userInfo.classList.add('lightbox-footer-userinfo');
   
+  const usernameRow = document.createElement('div');
+  usernameRow.classList.add('lightbox-footer-username-row');
   const username = document.createElement('span');
   username.classList.add('lightbox-footer-username');
   username.textContent = 'Загрузка...';
-  userInfo.appendChild(username);
+  usernameRow.appendChild(username);
+  userInfo.appendChild(usernameRow);
   
   const date = document.createElement('span');
   date.classList.add('lightbox-footer-date');
@@ -212,6 +230,7 @@ function openLightbox(imagePath, mediaItems = null) {
     }
     fetch('/api/photos/save', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ photoId: currentPhotoId })
     })
@@ -252,7 +271,7 @@ function openLightbox(imagePath, mediaItems = null) {
   downloadBtn.classList.add('lightbox-footer-btn');
   downloadBtn.onclick = function(e) {
     e.stopPropagation();
-    const currentPath2 = hasMultiple ? mediaItems[currentIndex].path : currentPath;
+    const currentPath2 = normalizedMediaItems[currentIndex].path;
     const link = document.createElement('a');
     link.href = currentPath2;
     link.download = currentPath2.split('/').pop() || 'image';
@@ -287,14 +306,35 @@ function openLightbox(imagePath, mediaItems = null) {
     });
   };
   rightSection.appendChild(deleteBtn);
+
+  function resetFooterForMedia(item) {
+    avatar.src = '/default-avatar.jpg'
+    username.textContent = item.mediaId ? 'Загрузка...' : 'Медиафайл'
+    window.FortPortRoles?.applyName(username, {});
+    usernameRow.querySelector('.role-badge')?.remove();
+    date.textContent = ''
+    deleteBtn.style.display = 'none'
+    openPageBtn.disabled = !item.mediaId
+    saveBtn.disabled = !item.mediaId
+    saveBtn.textContent = item.mediaId
+      ? (item.type === 'gif' ? 'Сохранить GIF' : 'Сохранить себе')
+      : 'Сохранение недоступно'
+    saveBtn.style.opacity = item.mediaId ? '1' : '0.5'
+    saveBtn.style.cursor = item.mediaId ? 'pointer' : 'default'
+  }
   
   footer.appendChild(rightSection);
   lightboxContent.appendChild(footer);
   lightbox.appendChild(lightboxContent);
   
   function updateFooter(data) {
+    openPageBtn.disabled = false
     avatar.src = data.profilePicture || '/default-avatar.jpg';
     username.textContent = data.username || 'Аноним';
+    window.FortPortRoles?.applyName(username, data);
+    usernameRow.querySelector('.role-badge')?.remove();
+    const roleBadge = window.FortPortRoles?.createBadge(data, { compact: true, button: false });
+    if (roleBadge) usernameRow.appendChild(roleBadge);
     date.textContent = data.createdAt ? new Date(data.createdAt).toLocaleString() : '';
     
     // Show/hide delete button
@@ -318,25 +358,17 @@ function openLightbox(imagePath, mediaItems = null) {
         saveBtn.style.cursor = 'pointer';
     }
 }
-  
-  if (currentPhotoId) {
-    fetch(`/api/photo/${currentPhotoId}`)
-      .then(r => r.json())
-      .then(data => {
-        currentPhotoData = data;
-        updateFooter(data);
-      })
-      .catch(err => console.error('Failed to fetch photo metadata:', err));
-  }
+
+  updateMedia(currentIndex)
   
   // Keyboard navigation
   document.addEventListener('keydown', function(e) {
     if (lightbox.style.display !== 'flex') return;
     if (e.key === 'ArrowLeft' && hasMultiple) {
-      currentIndex = (currentIndex - 1 + mediaItems.length) % mediaItems.length;
+      currentIndex = (currentIndex - 1 + normalizedMediaItems.length) % normalizedMediaItems.length;
       updateMedia(currentIndex);
     } else if (e.key === 'ArrowRight' && hasMultiple) {
-      currentIndex = (currentIndex + 1) % mediaItems.length;
+      currentIndex = (currentIndex + 1) % normalizedMediaItems.length;
       updateMedia(currentIndex);
     } else if (e.key === 'Escape') {
       closeLightbox();
@@ -415,7 +447,11 @@ let currentUserData = null
 
 document.addEventListener('DOMContentLoaded', () => {
     const isLoggedIn = localStorage.getItem('username')
-    
+
+    const path = window.location.pathname;
+    const isMainPage = path === '/' || path.includes('/main');
+    if (isMainPage) {
+    initFeed();
     const tabs = document.querySelectorAll('.tab-btn')
     tabs.forEach(tab => {
         const tabName = tab.dataset.tab
@@ -436,6 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
     tabs.forEach(t => t.classList.remove('active'))
     const activeTab = document.querySelector(`.tab-btn[data-tab="${currentTab}"]`)
     if (activeTab) activeTab.classList.add('active')
+}
 })
 
 // Reset pagination state and load fresh feed
@@ -550,7 +587,6 @@ function initFeed() {
 }
 
 // Start
-initFeed();
 
 function openProfilePicture(imagePath) {
     if (!imagePath || imagePath === '/default-avatar.jpg') return;

@@ -14,29 +14,9 @@ if (!window.__fortportPostDropdownDelegation) {
   })
 }
 
-// Client-side capability checks only control visibility. The server remains authoritative.
-function canCurrentUserModerate() {
-  return ['isAdmin', 'isOwner', 'isDeveloper', 'isModerator']
-    .some(key => localStorage.getItem(key) === 'true')
-}
-
-async function copyPostLink(postId) {
-  const postUrl = new URL(`/post?id=${encodeURIComponent(postId)}`, window.location.origin).href
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    await navigator.clipboard.writeText(postUrl)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = postUrl
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  if (!copied) throw new Error('Clipboard is unavailable')
+// Helper function to check if user is admin
+function isUserAdmin() {
+	return localStorage.getItem('isAdmin') === 'true'
 }
 
 function sanitizeHTML(str) {
@@ -273,7 +253,7 @@ spoiler preview: "${spoilerPreview}"`
   }
 
   const isPostOwner = currentUserId === post.userId
-const canModerate = canCurrentUserModerate()
+const isAdmin = isUserAdmin()
 const postInteractions = document.createElement('span')
 postInteractions.textContent = '▼'
 postInteractions.classList.add('post-interactions')
@@ -284,50 +264,8 @@ postInteractionsTable.classList.add('post-dropdown')
 // Initially hide the dropdown
 postInteractionsTable.style.display = 'none'
 
-const copyLinkBtn = document.createElement('button')
-copyLinkBtn.textContent = 'Скопировать ссылку на пост'
-copyLinkBtn.classList.add('dropdown-item')
-copyLinkBtn.addEventListener('click', async function(e) {
-  e.stopPropagation()
-  const originalText = copyLinkBtn.textContent
-  try {
-    await copyPostLink(post.id)
-    copyLinkBtn.textContent = 'Ссылка скопирована'
-  } catch (error) {
-    console.error('Copy post link error:', error)
-    copyLinkBtn.textContent = 'Не удалось скопировать'
-  }
-  setTimeout(() => {
-    copyLinkBtn.textContent = originalText
-    postInteractionsTable.style.display = 'none'
-  }, 1200)
-})
-postInteractionsTable.appendChild(copyLinkBtn)
-
-if (isPostOwner || canModerate) {
+if (isPostOwner || isAdmin) {
   if (isPostOwner) {
-    const pinBtn = document.createElement('button')
-    pinBtn.textContent = post.isPinned ? 'Открепить' : 'Закрепить'
-    pinBtn.classList.add('dropdown-item')
-    pinBtn.addEventListener('click', async function(e) {
-      e.stopPropagation()
-      postInteractionsTable.style.display = 'none'
-      const response = await fetch('/api/profile/pinned-post', {
-        method: post.isPinned ? 'DELETE' : 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postId: post.id })
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        alert(data.error || 'Не удалось изменить закреплённый пост')
-        return
-      }
-      post.isPinned = !post.isPinned
-      if (typeof onRefreshCallback === 'function') onRefreshCallback()
-    })
-    postInteractionsTable.appendChild(pinBtn)
-
     const editBtn = document.createElement('button')
     editBtn.textContent = 'Изменить'
     editBtn.classList.add('dropdown-item')
@@ -347,20 +285,9 @@ if (isPostOwner || canModerate) {
   deleteBtn.addEventListener('click', function(e) {
     e.stopPropagation()
     postInteractionsTable.style.display = 'none'
-
-    let reason = ''
-    if (!isPostOwner && canModerate) {
-      reason = window.prompt('Укажите обязательную причину удаления поста:') || ''
-      reason = reason.trim()
-      if (!reason) {
-        alert('Причина удаления обязательна')
-        return
-      }
-    }
-
-    if (confirm('Удалить этот пост без возможности восстановления?')) {
+    if (confirm('Delete this post?')) {
       if (typeof window.deletePost === 'function') {
-        window.deletePost(post.id, postDiv, onRefreshCallback, { reason })
+        window.deletePost(post.id, postDiv, onRefreshCallback)
       }
     }
   })
@@ -523,26 +450,202 @@ contentRow.appendChild(textDiv);
     }
 }
 
-  // AUDIO SECTION
+    // AUDIO SECTION
   if (post.files && post.files.length > 0) {
     const audioFiles = post.files.filter((file, index) => {
       const type = post.fileTypes?.[index] || 'image'
       return type === 'audio'
     })
-    
+
     if (audioFiles.length > 0) {
       const audioContainer = document.createElement('div')
       audioContainer.classList.add('post-audio-container')
-      
+
       audioFiles.forEach(audioPath => {
+        const audioItem = document.createElement("div")
+        audioItem.classList.add('post-audio-item')
+
+        const playButton = document.createElement("button")
+        playButton.classList.add("post-audio-play-button")
+
+        const playIcon = document.createElement("img")
+        playIcon.classList.add("post-audio-play-icon")
+        playIcon.src = "/ui/icons/play.webp"
+        playButton.appendChild(playIcon)
+
+        const downloadButton = document.createElement("button")
+        downloadButton.classList.add("post-audio-download-button")
+        downloadButton.textContent = "⬇"
+
+        const addButton = document.createElement("button")
+        addButton.classList.add("post-audio-add-button")
+        addButton.textContent = "+"
+
+        const volumeContainer = document.createElement("div")
+        volumeContainer.classList.add("post-audio-volume")
+
+        const volumeIcon = document.createElement("img")
+        volumeIcon.classList.add("post-audio-volume-icon")
+        volumeIcon.src = "/ui/icons/volume.webp"
+        volumeContainer.appendChild(volumeIcon)
+
+        const volumeSlider = document.createElement("input")
+        volumeSlider.classList.add("post-audio-volume-slider")
+        volumeSlider.type = "range"
+        volumeSlider.min = "0"
+        volumeSlider.max = "1"
+        volumeSlider.step = "0.01"
+        volumeSlider.value = "0.8"
+        volumeSlider.style.backgroundSize = "80% 100%"
+        volumeContainer.appendChild(volumeSlider)
+
+        const actions = document.createElement("div")
+        actions.classList.add("post-audio-actions")
+        actions.appendChild(volumeContainer)
+
+        actions.appendChild(downloadButton)
+        actions.appendChild(addButton)
+
+        const progressContainer = document.createElement("div")
+        progressContainer.classList.add("post-audio-progress-container")
+
+        const currentTime = document.createElement("span")
+        currentTime.classList.add("post-audio-current-time")
+        currentTime.innerText = "0:00"
+        progressContainer.appendChild(currentTime)
+
+
+        const progressBar = document.createElement("input")
+        progressBar.type = "range"
+        progressBar.min = "0"
+        progressBar.max = "100"
+        progressBar.value = "0"
+        progressBar.classList.add("post-audio-progress-bar")
+        progressContainer.appendChild(progressBar)
+
+        const player = document.createElement("div")
+        player.classList.add("post-audio-player")
+        player.appendChild(progressContainer)
+
+
+
+        const duration = document.createElement("span")
+        duration.classList.add("post-audio-duration")
+        duration.innerText = "0:00"
+        progressContainer.appendChild(duration)
+
+
+
+        const audioInfo = document.createElement("div")
+        audioInfo.classList.add("post-audio-info")
+
+        const audioName = document.createElement("div")
+        audioName.classList.add("post-audio-name")
+        audioInfo.appendChild(audioName)
+
+        const audioArtist = document.createElement("div")
+        audioArtist.classList.add("post-audio-artist")
+        audioInfo.appendChild(audioArtist)
+
+        const audioTop = document.createElement("div")
+        audioTop.classList.add("post-audio-top")
+        audioTop.appendChild(audioInfo)
+        audioTop.appendChild(actions)
+
+
+
+        const match = audioPath.match(/\/audio\/(\d+)/)
+        const audioId = match ? match[1] : null
+
+        playButton.addEventListener("click", e => {
+          e.stopPropagation()
+          if (audio.paused) {
+            audio.play()
+            playIcon.src = '/ui/icons/pause.webp'
+          } else {
+            audio.pause()
+            playIcon.src = '/ui/icons/play.webp'
+          }
+        })
+
+        addButton.addEventListener('click', () => {
+          fetch(`/api/users/audios/${audioId}`, {
+            method: 'POST',
+            credentials: "same-origin"
+          })
+            .catch(err => {
+              console.error('Error adding to library:', err);
+            })
+        })
+
+
+
+
         const audio = document.createElement('audio')
         audio.src = audioPath
-        audio.controls = true
+        audio.controls = false
         audio.classList.add('post-audio')
         audio.preload = 'metadata'
-        audioContainer.appendChild(audio)
+
+
+        volumeSlider.addEventListener("input", (e) => {
+          volumeSlider.style.backgroundSize = `${e.target.value * 100}% 100%`
+          audio.volume = e.target.value
+        })
+
+        progressBar.addEventListener("input", (e) => {
+          if (!audio.duration) return
+
+          const percent = e.target.value
+
+          audio.currentTime = audio.duration * (percent / 100)
+          progressBar.style.backgroundSize = `${percent}% 100%`
+        })
+
+        downloadButton.addEventListener('click', () => {
+          const link = document.createElement('a');
+          link.href = audioPath;
+          link.download = (audio.dataset.audioName || 'audio') + '.mp3';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        })
+
+
+        fetch(`api/audio/${audioId}`, {
+          method: 'GET',
+          credentials: "same-origin"
+        })
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            audioName.textContent = data.name
+            audioArtist.textContent = data.artistName
+            audio.dataset.artistName = data.artistName
+            audio.dataset.audioName = data.name
+          })
+
+        audio.addEventListener("timeupdate", () => {
+          if (!audio.duration) return
+
+          const percent = audio.currentTime / audio.duration * 100
+          progressBar.style.backgroundSize = `${percent}% 100%`
+
+          progressBar.value = percent
+
+          currentTime.innerText = `${Math.floor(audio.currentTime / 60)}:${Math.floor(audio.currentTime % 60).toString().padStart(2, "0")}`
+        })
+
+        audio.addEventListener('loadedmetadata', () => duration.innerText = `${Math.floor(audio.duration / 60)}:${Math.floor(audio.duration % 60).toString().padStart(2, "0")}`)
+
+        audioItem.appendChild(player)
+        audioItem.appendChild(audioTop)
+        player.appendChild(audio)
+        player.appendChild(playButton)
+        player.appendChild(progressContainer)
+
+        audioContainer.appendChild(audioItem)
       })
-      
+
       contentRow.appendChild(audioContainer)
     }
   }
@@ -1722,9 +1825,9 @@ if (comment.content) {
     commentFooter.classList.add('comment-footer');
     
     const isCommentOwner = currentUserId === comment.userId;
-    const canModerate = canCurrentUserModerate();
+    const isAdmin = isUserAdmin();
     
-    if (isCommentOwner || canModerate) {
+    if (isCommentOwner || isAdmin) {
         const deleteBtn = document.createElement('button');
         deleteBtn.classList.add('comment-delete-btn');
         deleteBtn.innerHTML = 'Удалить';

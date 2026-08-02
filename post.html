@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body>
-    <div class="feedmain">
+    <div class="feedmain post-page-feed">
         <div id="post-container"></div>
     </div>
 
@@ -18,12 +18,34 @@
     <script src="/scripts/edit.js"></script>
     <script src="/scripts/post.js"></script>
     <script type="module" src="/scripts/crypto-utils.js"></script>
+    <script type="module" src="/scripts/client.js"></script>
     <script type="module" src="/scripts/display-post.js"></script>
     <script type="module">
         import * as PostDisplay from './scripts/display-post.js'
 
         const urlParams = new URLSearchParams(window.location.search)
         const postId = urlParams.get('id')
+        const targetCommentId = urlParams.get('comment')
+
+        async function focusTargetComment(commentId) {
+            if (!commentId) return
+            for (let attempt = 0; attempt < 24; attempt += 1) {
+                const comment = document.querySelector(`[data-comment-id="${CSS.escape(String(commentId))}"]`)
+                if (comment) {
+                    comment.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    comment.classList.add('comment-notification-target')
+                    setTimeout(() => comment.classList.remove('comment-notification-target'), 3200)
+                    return
+                }
+                document.querySelectorAll('.toggle-replies-btn').forEach(button => {
+                    if (button.offsetParent !== null && !button.dataset.notificationExpanded) {
+                        button.dataset.notificationExpanded = 'true'
+                        button.click()
+                    }
+                })
+                await new Promise(resolve => setTimeout(resolve, 125))
+            }
+        }
 
         if (!postId) {
             window.location.href = '/'
@@ -54,6 +76,7 @@
                 // Load user map and display post
                 await PostDisplay.loadUserMap()
                 PostDisplay.displayPosts('post-container', [post], loadPost)
+                await focusTargetComment(targetCommentId)
             } catch (err) {
                 console.error(err)
                 document.getElementById('post-container').innerHTML = `
@@ -67,6 +90,5 @@
         loadPost()
     </script>
 	<script src="/scripts/mascot.js"></script>
-  <script src="/scripts/online-counter.js"></script>
 </body>
 </html>

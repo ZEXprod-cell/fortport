@@ -10,13 +10,13 @@ const https = require('https')
 const saltRounds = 10
 const app = express()
 const sqlite3 = require('sqlite3').verbose();
-const dbPath = path.join(__dirname, 'data', 'chats.db');
+const dbPath = path.join(__dirname, 'api', 'chats.db');
 const db = new sqlite3.Database(dbPath);
 const crypto = require('crypto');
-const sessionsDb = new sqlite3.Database(path.join(__dirname, 'data', 'sessions.db'));
+const sessionsDb = new sqlite3.Database(path.join(__dirname, 'api', 'sessions.db'));
 const rateLimit = require('express-rate-limit');
 const zlib = require('zlib');
-const mainDbPath = path.join(__dirname, 'data', 'main.db');
+const mainDbPath = path.join(__dirname, 'api', 'main.db');
 const mainDb = new sqlite3.Database(mainDbPath);
 
 function dbRun(database, sql, params = []) {
@@ -298,7 +298,7 @@ async function runDatabaseMigrations() {
         await dbRun(mainDb, `
             CREATE TABLE IF NOT EXISTS moderation_audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                moderator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+                moderator_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 flag_id INTEGER,
                 post_id INTEGER,
                 action TEXT NOT NULL,
@@ -502,18 +502,6 @@ app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store')
   next()
 })
-
-// Reject unmistakably automated clients before they reach API handlers. User-Agent
-// filtering is deliberately paired with the JavaScript challenge below, since it can
-// be forged by a determined bot.
-const blockedUserAgent = /(?:^$|\b(?:bot|crawler|spider|scrapy|curl|wget|python-requests|axios|headless)\b)/i;
-app.use('/api', (req, res, next) => {
-  const userAgent = req.get('user-agent') || '';
-  if (blockedUserAgent.test(userAgent)) {
-    return res.status(403).json({ error: 'Automated requests are not allowed' });
-  }
-  next();
-})
 const blockedStaticRoots = new Set([
   'backups',
   'config',
@@ -524,6 +512,7 @@ const blockedStaticRoots = new Set([
 ])
 const blockedStaticFiles = new Set([
   '.env',
+  '.db',
   'package.json',
   'package-lock.json',
   'server.js',
@@ -701,110 +690,6 @@ async function authenticate(req, res, next) {
     });
   });
 }
-
-
-// ============ ONLINE USERS COUNTER ============
-// In-memory presence is intentionally per server process. A user is counted once,
-// regardless of how many tabs are open.
-const onlineUsers = new Map(); // Map<userId, Map<browserTabId, lastHeartbeatMs>>
-const ONLINE_TTL_MS = 75 * 1000;
-
-function removeInactiveOnlineUsers() {
-  const expiresBefore = Date.now() - ONLINE_TTL_MS;
-  for (const [userId, tabs] of onlineUsers) {
-    for (const [tabId, lastSeen] of tabs) {
-      if (lastSeen < expiresBefore) tabs.delete(tabId);
-    }
-    if (tabs.size === 0) onlineUsers.delete(userId);
-  }
-}
-
-function onlineUsersCount() {
-  removeInactiveOnlineUsers();
-  return onlineUsers.size;
-}
-
-app.post('/api/online/heartbeat', authenticate, (req, res) => {
-  const clientId = typeof req.body?.clientId === 'string' ? req.body.clientId : '';
-  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(clientId)) {
-    return res.status(400).json({ error: 'Invalid client ID' });
-  }
-  let tabs = onlineUsers.get(req.userId);
-  if (!tabs) {
-    tabs = new Map();
-    onlineUsers.set(req.userId, tabs);
-  }
-  tabs.set(clientId, Date.now());
-  res.json({ online: onlineUsersCount() });
-});
-
-app.get('/api/online', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({ online: onlineUsersCount() });
-});
-
-setInterval(removeInactiveOnlineUsers, 60 * 1000).unref();
-
-// ============ JAVASCRIPT ANTI-BOT CHALLENGE ============
-const pendingBotChallenges = new Map();
-const verifiedBotTokens = new Map();
-const BOT_CHALLENGE_TTL_MS = 5 * 60 * 1000;
-const BOT_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
-const BOT_CHALLENGE_DIFFICULTY = 3;
-
-function cleanupBotChallenges() {
-  const now = Date.now();
-  for (const [id, item] of pendingBotChallenges) {
-    if (item.expiresAt < now) pendingBotChallenges.delete(id);
-  }
-  for (const [token, expiresAt] of verifiedBotTokens) {
-    if (expiresAt < now) verifiedBotTokens.delete(token);
-  }
-}
-
-app.get('/api/challenge', (req, res) => {
-  cleanupBotChallenges();
-  const id = crypto.randomBytes(18).toString('base64url');
-  const nonce = crypto.randomBytes(24).toString('base64url');
-  pendingBotChallenges.set(id, { nonce, expiresAt: Date.now() + BOT_CHALLENGE_TTL_MS });
-  res.set('Cache-Control', 'no-store');
-  res.json({ id, nonce, difficulty: BOT_CHALLENGE_DIFFICULTY });
-});
-
-app.post('/api/challenge/verify', (req, res) => {
-  cleanupBotChallenges();
-  const { id, answer } = req.body || {};
-  const item = typeof id === 'string' ? pendingBotChallenges.get(id) : null;
-  if (!item || typeof answer !== 'string' || !/^\d{1,12}$/.test(answer)) {
-    return res.status(400).json({ error: 'Invalid or expired challenge' });
-  }
-  const digest = crypto.createHash('sha256').update(`${item.nonce}:${answer}`).digest('hex');
-  if (!digest.startsWith('0'.repeat(BOT_CHALLENGE_DIFFICULTY))) {
-    return res.status(400).json({ error: 'Challenge verification failed' });
-  }
-  pendingBotChallenges.delete(id);
-  const token = crypto.randomBytes(32).toString('base64url');
-  verifiedBotTokens.set(token, Date.now() + BOT_VERIFICATION_TTL_MS);
-  res.cookie('bot_verified', token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: BOT_VERIFICATION_TTL_MS
-  });
-  res.json({ verified: true });
-});
-
-function requireBotChallenge(req, res, next) {
-  cleanupBotChallenges();
-  const token = req.cookies?.bot_verified;
-  const expiresAt = token && verifiedBotTokens.get(token);
-  if (!expiresAt || expiresAt < Date.now()) {
-    return res.status(403).json({ error: 'Подтвердите, что вы не бот, и повторите попытку.' });
-  }
-  next();
-}
-
-setInterval(cleanupBotChallenges, 5 * 60 * 1000).unref();
 
 
 
@@ -2169,9 +2054,6 @@ app.get('/post', optionalAuth, async (req, res) => {
             `;
         }
         
-        // JSON is embedded into a script tag; escape '<' so post text cannot terminate it.
-        const safePostJson = JSON.stringify(post).replace(/</g, '\\u003c');
-
         // Build metadata HTML to inject
         const metadata = `
             <!-- Primary Meta Tags -->
@@ -2203,7 +2085,7 @@ app.get('/post', optionalAuth, async (req, res) => {
             <!-- Pass post data to JavaScript -->
             <script>
                 window.POST_ID = ${postId};
-                window.POST_DATA = ${safePostJson};
+                window.POST_DATA = ${JSON.stringify(post)};
                 window.BACKGROUND_IMAGE = ${backgroundImage ? JSON.stringify(backgroundImage) : 'null'};
             </script>
         `;
@@ -2236,7 +2118,7 @@ app.get('/new_community', (req, res) => {
 
 // ============ USER ROUTES ============
 
-app.post('/api/register', requireBotChallenge, registrationLimiter, async (req, res) => {
+app.post('/api/register', registrationLimiter, async (req, res) => {
   try {
     const { username, password, email } = req.body;
     
@@ -2433,7 +2315,7 @@ app.post('/api/resend-verification', accountEmailLimiter, async (req, res) => {
 });
 
 // Login endpoint
-app.post('/api/login', requireBotChallenge, loginLimiter, async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   try {
     const { identifier, password } = req.body;
     
@@ -3944,7 +3826,7 @@ app.get('/api/posts/feed/:lastPostId', optionalAuth, async (req, res) => {
             userId: filter == 'friends' ? 'friends' : filter == 'recommended' ? 'not_friends' : -1,
             communityId: filter == 'subscriptions' ? 'subscriptions' : filter == 'recommended' ? 'not_subscriptions' :  -1,
             before: lastPostId === -1 ? null : lastPostId,
-            limit: 50,
+            limit: 15,
             currentUserId: userId,
 	    timeSpan: timeRange,
 	    sortBy: sort
@@ -4196,122 +4078,6 @@ app.post('/api/mod/reports/:flagId/action', authenticate, requireModerator, asyn
         res.json({ success: true, action, postId: flag.post_id });
     } catch (error) {
         console.error('Moderation report action error:', error);
-        res.status(error.status || 500).json({ error: error.message || 'Server error' });
-    }
-});
-
-async function deleteReportedAuthor(flagId, moderatorUserId, reason) {
-    const flag = await dbGet(mainDb, `
-        SELECT mf.id, mf.post_id, mf.resolved, p.user_id AS target_user_id
-        FROM mod_posts_flagged mf
-        JOIN posts p ON p.id = mf.post_id
-        WHERE mf.id = ? AND mf.resolved = 0
-    `, [flagId]);
-    if (!flag) throw Object.assign(new Error('Активная жалоба не найдена'), { status: 404 });
-    if (!flag.target_user_id) throw Object.assign(new Error('У поста нет удаляемого автора'), { status: 400 });
-    if (Number(flag.target_user_id) === Number(moderatorUserId)) {
-        throw Object.assign(new Error('Нельзя удалить собственный аккаунт'), { status: 403 });
-    }
-
-    const targetCapabilities = await getUserCapabilities(flag.target_user_id);
-    if (targetCapabilities.isAdmin || targetCapabilities.isDeveloper || targetCapabilities.isModerator || targetCapabilities.isOwner) {
-        throw Object.assign(new Error('Нельзя удалить аккаунт с защищённой ролью'), { status: 403 });
-    }
-    const targetAudit = await dbGet(mainDb, 'SELECT 1 FROM moderation_audit_log WHERE moderator_user_id = ? LIMIT 1', [flag.target_user_id]);
-    if (targetAudit) {
-        throw Object.assign(new Error('Нельзя удалить аккаунт модератора с сохранённой историей аудита'), { status: 403 });
-    }
-
-    const targetUserId = Number(flag.target_user_id);
-    const postFiles = await dbAll(mainDb, `
-        SELECT DISTINCT pf.file_path
-        FROM post_files pf
-        JOIN posts p ON p.id = pf.post_id
-        WHERE p.user_id = ?
-    `, [targetUserId]);
-    const ownedMedia = await dbAll(mainDb, `
-        SELECT file_path FROM photos WHERE uploaded_by = ?
-        UNION SELECT file_path FROM videos WHERE uploaded_by = ?
-        UNION SELECT file_path FROM audio WHERE uploaded_by = ?
-    `, [targetUserId, targetUserId, targetUserId]);
-    const allFiles = [...new Set([...postFiles, ...ownedMedia].map(row => row.file_path).filter(Boolean))];
-    const now = Math.floor(Date.now() / 1000);
-
-    await dbRun(mainDb, 'BEGIN IMMEDIATE TRANSACTION');
-    try {
-        await dbRun(mainDb, `
-            INSERT INTO moderation_audit_log
-                (moderator_user_id, flag_id, post_id, action, details, created_at)
-            VALUES (?, ?, NULL, 'delete_user', ?, ?)
-        `, [moderatorUserId, flagId, JSON.stringify({ targetUserId, reportedPostId: flag.post_id, reason }), now]);
-
-        await dbRun(mainDb, 'UPDATE admins SET granted_by = NULL WHERE granted_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE user_roles SET granted_by = NULL WHERE granted_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE album_photos SET added_by = NULL WHERE added_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE album_videos SET added_by = NULL WHERE added_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE communities SET owner_id = NULL WHERE owner_id = ?', [targetUserId]);
-        const targetPosts = await dbAll(mainDb, 'SELECT id FROM posts WHERE user_id = ?', [targetUserId]);
-        for (const targetPost of targetPosts) {
-            await dbRun(mainDb, 'DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM comments WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM post_likes WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM post_dislikes WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM post_files WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM post_tags WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM profile_pinned_posts WHERE post_id = ?', [targetPost.id]);
-            await dbRun(mainDb, 'DELETE FROM posts WHERE id = ?', [targetPost.id]);
-        }
-        await dbRun(mainDb, 'UPDATE comments SET user_id = NULL WHERE user_id = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE mod_posts_flagged SET resolved_by = NULL WHERE resolved_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE post_moderation_state SET hidden_by = NULL WHERE hidden_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'UPDATE post_moderation_state SET deleted_by = NULL WHERE deleted_by = ?', [targetUserId]);
-
-        await dbRun(mainDb, 'DELETE FROM playlist_videos WHERE playlist_id IN (SELECT id FROM video_playlists WHERE user_id = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM video_playlists WHERE user_id = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM photo_albums WHERE creator_id = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM user_audio_library WHERE user_id = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM playlist_audios WHERE playlist_id IN (SELECT id FROM audio_playlists WHERE created_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM user_audio_playlists WHERE playlist_id IN (SELECT id FROM audio_playlists WHERE created_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM audio_playlists WHERE created_by = ?', [targetUserId]);
-
-        await dbRun(mainDb, 'DELETE FROM album_photos WHERE photo_id IN (SELECT id FROM photos WHERE uploaded_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM playlist_videos WHERE video_id IN (SELECT id FROM videos WHERE uploaded_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM album_videos WHERE video_id IN (SELECT id FROM videos WHERE uploaded_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM user_audio_library WHERE audio_id IN (SELECT id FROM audio WHERE uploaded_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM playlist_audios WHERE audio_id IN (SELECT id FROM audio WHERE uploaded_by = ?)', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM photos WHERE uploaded_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM videos WHERE uploaded_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM audio WHERE uploaded_by = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM user_photo_albums WHERE user_id = ?', [targetUserId]);
-        await dbRun(mainDb, 'DELETE FROM user_mascot_hh WHERE user_id = ?', [targetUserId]);
-
-        const deleted = await dbRun(mainDb, 'DELETE FROM users WHERE id = ?', [targetUserId]);
-        if (!deleted.changes) throw Object.assign(new Error('Пользователь не найден'), { status: 404 });
-        await dbRun(mainDb, 'COMMIT');
-    } catch (error) {
-        await dbRun(mainDb, 'ROLLBACK').catch(() => {});
-        throw error;
-    }
-
-    await dbRun(sessionsDb, 'DELETE FROM sessions WHERE user_id = ?', [targetUserId]);
-    for (const filePath of allFiles) {
-        if (!(await isMediaPathStillReferenced(filePath))) deleteManagedMediaFile(filePath);
-    }
-    return targetUserId;
-}
-
-app.post('/api/mod/reports/:flagId/delete-author', authenticate, requireModerator, async (req, res) => {
-    const flagId = Number(req.params.flagId);
-    const reason = String(req.body?.reason || '').trim();
-    if (!Number.isSafeInteger(flagId)) return res.status(400).json({ error: 'Invalid report ID' });
-    if (!reason) return res.status(400).json({ error: 'Причина удаления обязательна' });
-    if (reason.length > 1000) return res.status(400).json({ error: 'Причина удаления слишком длинная' });
-
-    try {
-        const userId = await deleteReportedAuthor(flagId, req.userId, reason);
-        res.json({ success: true, userId });
-    } catch (error) {
-        console.error('Delete reported author error:', error);
         res.status(error.status || 500).json({ error: error.message || 'Server error' });
     }
 });
@@ -5781,25 +5547,11 @@ app.put('/api/posts/:id', authenticate, uploadMedia.array('files', 10), async (r
             return res.status(403).json({ error: 'Not authorized to edit this post' });
         }
 
-        const currentFiles = await dbAll(
-            mainDb,
-            'SELECT file_path, file_type, display_name FROM post_files WHERE post_id = ? ORDER BY file_order ASC',
-            [postId]
-        );
-
         let attachmentOrder;
-        if (Object.prototype.hasOwnProperty.call(req.body, 'attachmentOrder')) {
-            try {
-                attachmentOrder = JSON.parse(req.body.attachmentOrder);
-            } catch {
-                return res.status(400).json({ error: 'Invalid attachment order' });
-            }
-        } else {
-            attachmentOrder = currentFiles.map(file => ({
-                kind: 'existing',
-                path: file.file_path,
-                type: file.file_type
-            }));
+        try {
+            attachmentOrder = JSON.parse(req.body.attachmentOrder || '[]');
+        } catch {
+            return res.status(400).json({ error: 'Invalid attachment order' });
         }
 
         if (!Array.isArray(attachmentOrder) || attachmentOrder.length > 10) {
@@ -5819,6 +5571,11 @@ app.put('/api/posts/:id', authenticate, uploadMedia.array('files', 10), async (r
             return res.status(400).json({ error: 'Invalid uploaded attachment order' });
         }
 
+        const currentFiles = await dbAll(
+            mainDb,
+            'SELECT file_path, file_type, display_name FROM post_files WHERE post_id = ?',
+            [postId]
+        );
         const currentFileKeys = new Set(currentFiles.map(file => `${file.file_type}\n${file.file_path}`));
         const processedUploads = new Map();
 
@@ -5882,74 +5639,10 @@ app.put('/api/posts/:id', authenticate, uploadMedia.array('files', 10), async (r
     }
 });
 
-async function isMediaPathStillReferenced(filePath) {
-    const row = await dbGet(mainDb, `
-        SELECT 1
-        FROM post_files
-        WHERE file_path = ?
-        UNION ALL SELECT 1 FROM photos WHERE file_path = ?
-        UNION ALL SELECT 1 FROM videos WHERE file_path = ?
-        UNION ALL SELECT 1 FROM audio WHERE file_path = ?
-        LIMIT 1
-    `, [filePath, filePath, filePath, filePath]);
-    return Boolean(row);
-}
-
-async function deletePostData(postId, moderation = null) {
-    const files = await dbAll(mainDb, 'SELECT DISTINCT file_path FROM post_files WHERE post_id = ?', [postId]);
-    const now = Math.floor(Date.now() / 1000);
-
-    await dbRun(mainDb, 'BEGIN IMMEDIATE TRANSACTION');
-    try {
-        if (moderation) {
-            if (moderation.flagId) {
-                await dbRun(mainDb, `
-                    UPDATE mod_posts_flagged
-                    SET resolved = 1, resolved_by = ?, resolved_at = ?, status = 'resolved', resolution_action = 'delete_post'
-                    WHERE id = ? AND post_id = ?
-                `, [moderation.moderatorUserId, now, moderation.flagId, postId]);
-            }
-            await dbRun(mainDb, `
-                INSERT INTO moderation_audit_log
-                    (moderator_user_id, flag_id, post_id, action, details, created_at)
-                VALUES (?, ?, ?, 'delete_post', ?, ?)
-            `, [
-                moderation.moderatorUserId,
-                moderation.flagId || null,
-                postId,
-                JSON.stringify({ ownerId: moderation.ownerId, reason: moderation.reason }),
-                now
-            ]);
-        }
-
-        await dbRun(mainDb, 'DELETE FROM profile_pinned_posts WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)', [postId]);
-        await dbRun(mainDb, 'DELETE FROM comments WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM post_likes WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM post_dislikes WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM post_files WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM post_tags WHERE post_id = ?', [postId]);
-        await dbRun(mainDb, 'DELETE FROM posts WHERE id = ?', [postId]);
-        await dbRun(mainDb, 'COMMIT');
-    } catch (error) {
-        await dbRun(mainDb, 'ROLLBACK').catch(() => {});
-        throw error;
-    }
-
-    for (const file of files) {
-        if (!(await isMediaPathStillReferenced(file.file_path))) {
-            deleteManagedMediaFile(file.file_path);
-        }
-    }
-}
-
 app.delete('/api/posts/:id', authenticate, async (req, res) => {
     const postId = Number(req.params.id);
     const userId = req.userId;
-    const reason = String(req.body?.reason || '').trim();
-    const flagId = req.body?.flagId == null ? null : Number(req.body.flagId);
     if (!Number.isSafeInteger(postId)) return res.status(400).json({ error: 'Invalid post ID' });
-    if (flagId !== null && !Number.isSafeInteger(flagId)) return res.status(400).json({ error: 'Invalid report ID' });
 
     try {
         const post = await dbGet(mainDb, 'SELECT user_id, is_anonymous FROM posts WHERE id = ?', [postId]);
@@ -5961,26 +5654,54 @@ app.delete('/api/posts/:id', authenticate, async (req, res) => {
             capabilities.isAdmin || capabilities.isDeveloper || capabilities.isModerator
         ));
         if (!isOwner && !canModerate) return res.status(403).json({ error: 'Not authorized' });
-        if (canModerate && !reason) return res.status(400).json({ error: 'Причина удаления обязательна' });
-        if (reason.length > 1000) return res.status(400).json({ error: 'Причина удаления слишком длинная' });
 
-        if (flagId && canModerate) {
-            const flag = await dbGet(mainDb, 'SELECT id FROM mod_posts_flagged WHERE id = ? AND post_id = ? AND resolved = 0', [flagId, postId]);
-            if (!flag) return res.status(404).json({ error: 'Активная жалоба не найдена' });
+        if (canModerate) {
+            await dbRun(mainDb, `
+                INSERT INTO moderation_audit_log
+                    (moderator_user_id, post_id, action, details, created_at)
+                VALUES (?, ?, 'delete_post', ?, ?)
+            `, [userId, postId, JSON.stringify({ ownerId: post.user_id }), Math.floor(Date.now() / 1000)]);
         }
-
-        await deletePostData(postId, canModerate ? {
-            moderatorUserId: userId,
-            ownerId: post.user_id,
-            reason,
-            flagId
-        } : null);
-        res.json({ success: true });
+        await dbRun(mainDb, 'DELETE FROM profile_pinned_posts WHERE post_id = ?', [postId]);
+        deletePostFiles(postId, () => {
+            deletePostData(postId, res).catch(error => {
+                console.error('Delete post data error:', error);
+                if (!res.headersSent) res.status(500).json({ error: 'Failed to delete post' });
+            });
+        });
     } catch (error) {
-        console.error('Delete post error:', error);
-        res.status(error.statusCode || 500).json({ error: error.message || 'Failed to delete post' });
+        console.error('Delete post authorization error:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 });
+
+function deletePostFiles(postId, callback) {
+    // Get all files first to delete from disk
+    mainDb.all(`SELECT file_path FROM post_files WHERE post_id = ?`, [postId], (err, files) => {
+        if (files) {
+            files.forEach(file => deleteManagedMediaFile(file.file_path));
+        }
+        callback();
+    });
+}
+
+async function deletePostData(postId, res) {
+    await dbRun(mainDb, 'BEGIN IMMEDIATE TRANSACTION');
+    try {
+        await dbRun(mainDb, 'DELETE FROM comment_likes WHERE comment_id IN (SELECT id FROM comments WHERE post_id = ?)', [postId]);
+        await dbRun(mainDb, 'DELETE FROM comments WHERE post_id = ?', [postId]);
+        await dbRun(mainDb, 'DELETE FROM post_likes WHERE post_id = ?', [postId]);
+        await dbRun(mainDb, 'DELETE FROM post_dislikes WHERE post_id = ?', [postId]);
+        await dbRun(mainDb, 'DELETE FROM post_files WHERE post_id = ?', [postId]);
+        await dbRun(mainDb, 'DELETE FROM post_tags WHERE post_id = ?', [postId]);
+        await dbRun(mainDb, 'DELETE FROM posts WHERE id = ?', [postId]);
+        await dbRun(mainDb, 'COMMIT');
+        res.json({ success: true });
+    } catch (error) {
+        await dbRun(mainDb, 'ROLLBACK').catch(() => {});
+        throw error;
+    }
+}
 
 // Get single post by ID
 app.get('/api/posts/:id', optionalAuth, async (req, res) => {
@@ -6269,6 +5990,30 @@ app.get('/api/users/:userId/communities', optionalAuth, async (req, res) => {
             }
         );
     });
+});
+
+// GET /api/users/:userId/commIds - Optimized endpoint returning only community IDs and names
+app.get('/api/users/:userId/commIds', optionalAuth, async (req, res) => {
+    try {
+        const targetUserId = parseInt(req.params.userId);
+
+        if (isNaN(targetUserId)) {
+            return res.status(400).json({ error: 'Invalid user ID' });
+        }
+
+        const communities = await dbAll(mainDb, `
+            SELECT c.id, c.username
+            FROM community_subscribers cs
+            JOIN communities c ON cs.community_id = c.id
+            WHERE cs.user_id = ?
+            ORDER BY c.id ASC
+        `, [targetUserId]);
+
+        res.json(communities);
+    } catch (error) {
+        console.error('Error fetching user community IDs:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
 });
 
 function getCommunitiesList(userId, res) {
@@ -6597,7 +6342,7 @@ app.get('/api/users/:userId/posts', optionalAuth, async (req, res) => {
     const targetUserId = parseInt(req.params.userId);
     const currentUserId = req.userId || null;
     const before = req.query.before ? parseInt(req.query.before) : null;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = parseInt(req.query.limit) || 15;
 
     const canView = await canViewUserPosts(targetUserId, currentUserId);
     if (!canView) return res.json([]);
@@ -8104,7 +7849,7 @@ app.get('/api/communities/:id/posts', optionalAuth, async (req, res) => {
     const communityId = parseInt(req.params.id);
     const currentUserId = req.userId || null;
     const before = req.query.before ? parseInt(req.query.before) : null;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = parseInt(req.query.limit) || 15;
 
     try {
         const result = await fetchPosts({

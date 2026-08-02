@@ -1,27 +1,24 @@
 // delete.js - Generic post deletion that works anywhere
 
-async function deletePost(postId, postElement, onSuccess, options = {}) {
-  try {
-    const response = await fetch('/api/posts/' + postId, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        reason: String(options.reason || '').trim(),
-        flagId: options.flagId || null
-      })
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || 'Не удалось удалить пост')
+function deletePost(postId, postElement, onSuccess) {
+  fetch('/api/posts/' + postId, {
+    method: 'DELETE'
+  })
+  .then(response => {
+    if (response.ok) {
+      // Option 1: Just remove the element (optimistic UI)
+      postElement.remove()
+      
+      // Option 2: Also call success callback if provided
+      if (onSuccess) {
+        onSuccess()
+      }
+    } else {
+      alert('Failed to delete post')
     }
-
-    if (postElement?.remove) postElement.remove()
-    if (typeof onSuccess === 'function') onSuccess()
-    return data
-  } catch (error) {
-    console.error('Delete error:', error)
-    alert(error.message || 'Ошибка при удалении поста')
-    throw error
-  }
+  })
+  .catch(err => {
+    console.error('Delete error:', err)
+    alert('Error deleting post')
+  })
 }

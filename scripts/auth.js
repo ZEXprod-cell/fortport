@@ -9,12 +9,16 @@ let notificationsPanel = null;
 let notificationsLoaded = false;
 
 function createUtilityBar() {
-    if (topUtilityBarCreated) return;
+    document.getElementById('utility-bar')?.remove();
     topUtilityBarCreated = true;
-    
-    const userId = localStorage.getItem('userId');
-    const username = localStorage.getItem('username');
-    const userAvatar = localStorage.getItem('userAvatar') || '/default-avatar.jpg';
+
+    const bootstrapUser = window.sessionBootstrap?.user;
+    const userId = bootstrapUser?.id ?? localStorage.getItem('userId');
+    const username = bootstrapUser?.username ?? localStorage.getItem('username');
+    const userAvatar = bootstrapUser?.profilePicture || localStorage.getItem('userAvatar') || '/default-avatar.jpg';
+    const role = window.FortPortRoles?.resolveRole(bootstrapUser || {});
+    const roleNameClass = role ? ` role-name role-name-${role}` : '';
+    const roleBadge = window.FortPortRoles?.badgeHtml(bootstrapUser || {}, { compact: true }) || '';
     
     const utilityBar = document.createElement('div');
     utilityBar.className = 'utility-bar';
@@ -38,9 +42,10 @@ function createUtilityBar() {
             <div class="utility-right">
                 <a href="#" class="utility-link utility-logout" onclick="logout()">Выйти</a>
 		
-                <a href="/profile?id=${userId}" class="utility-link utility-profile">
-                    <span class="utility-username">${escapeHtml(username)}</span>
-                    <img src="${userAvatar}" class="utility-avatar" onerror="this.src='/default-avatar.jpg'">
+                <a href="/profile?id=${encodeURIComponent(userId)}" class="utility-link utility-profile">
+                    <span class="utility-username${roleNameClass}">${escapeHtml(username)}</span>
+                    ${roleBadge}
+                    <img src="${escapeHtml(userAvatar)}" class="utility-avatar" alt="" onerror="this.src='/default-avatar.jpg'">
                 </a>
             </div>
         `;
@@ -470,6 +475,12 @@ async function loadNotifications() {
             ${getNotificationAvatar(notif)}
         </div>
         <div class="notification-content">
+            ${notif.requesterName ? `
+                <div class="notification-actor">
+                    <a href="/profile?id=${encodeURIComponent(notif.requesterId || notif.sourceId)}" class="notification-actor-name${notif.displayRole ? ` role-name role-name-${notif.displayRole}` : ''}">${escapeHtml(notif.requesterName)}</a>
+                    ${window.FortPortRoles?.badgeHtml(notif, { compact: true }) || ''}
+                </div>
+            ` : ''}
             <div class="notification-text">${escapeHtml(notif.text)}</div>
             ${notif.preview ? `<div class="notification-preview">${escapeHtml(notif.preview)}</div>` : ''}
             <div class="notification-time">${formatNotificationTime(notif.createdAt)}</div>
@@ -565,7 +576,7 @@ function getActionButtonsForType(notif) {
         case 'comment_on_post':
         case 'reply_to_comment':
             return `<div class="notification-action-bottom">
-                        <button class="notification-action-btn" onclick="viewCommentNotification(${notif.id}, ${notif.sourceId})">Ответить</button>
+                        <button class="notification-action-btn" onclick="viewCommentNotification(${notif.id}, ${notif.postId || notif.sourceId}, ${notif.commentId || 'null'})">Ответить</button>
     		<button class="notification-action-btn" onclick="markNotificationRead(${notif.id}, event)">Прочитать</button>
                     </div>`;
         case 'like_on_post':
@@ -657,9 +668,16 @@ window.addEventListener('beforeunload', () => {
     }
 });
 
-window.viewCommentNotification = function(notifId, postId) {
-markNotificationRead(notifId);
-window.location.href = `/post?id=${postId}`;
+window.viewCommentNotification = async function(notifId, postId, commentId) {
+    try {
+        await Promise.race([
+            markNotificationRead(notifId),
+            new Promise(resolve => setTimeout(resolve, 250))
+        ]);
+    } finally {
+        const target = commentId ? `&comment=${encodeURIComponent(commentId)}` : '';
+        window.location.href = `/post?id=${encodeURIComponent(postId)}${target}`;
+    }
 };
 
 window.viewLikeNotification = function(notifId, postId) {
@@ -667,19 +685,41 @@ window.viewLikeNotification = function(notifId, postId) {
  window.location.href = `/post?id=${postId}`;
 };
 
+async function handleFriendRequestNotification(action, notifId, requesterId) {
+    const item = document.querySelector(`.notification-item[data-notif-id="${notifId}"]`);
+    const buttons = item ? [...item.querySelectorAll('button')] : [];
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+        const response = await fetch(`/api/friends/${action}`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requesterUserId: Number(requesterId) })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Не удалось обработать заявку');
+        await markNotificationRead(notifId);
+        if (typeof window.updateFriendNotifications === 'function') {
+            const current = Math.max(0, (Number(localStorage.getItem('friendNotifications')) || 1) - 1);
+            window.updateFriendNotifications(current);
+        }
+    } catch (error) {
+        buttons.forEach(button => { button.disabled = false; });
+        alert(error.message);
+    }
+}
+
 window.acceptFriendRequestNotif = function(notifId, requesterId) {
-    // TODO: Accept friend request
-    console.log('Accept friend request:', notifId, requesterId);
-    // You'll implement the friend request acceptance here
+    return handleFriendRequestNotification('accept', notifId, requesterId);
 };
 
 window.rejectFriendRequestNotif = function(notifId, requesterId) {
-   markNotificationRead(notifId);
+    return handleFriendRequestNotification('reject', notifId, requesterId);
 };
 
 window.viewProfileNotification = function(notifId, userId) {
   markNotificationRead(notifId);
-  window.location.href = `/profile?user=${userId}`;
+  window.location.href = `/profile?id=${userId}`;
 };
 
 window.loadUserAvatar = function() {
@@ -692,6 +732,9 @@ window.loadUserAvatar = function() {
 }
 
 window.updateAuthButtons = updateAuthButtons
+window.addEventListener('fortport:roles-ready', () => {
+    if (window.sessionBootstrap?.user) createUtilityBar();
+});
 window.showNotifs = function(badgeElement) {
     if (notificationsPanel && notificationsPanel.classList.contains('show')) {
         closeNotificationsPanel();
@@ -787,8 +830,8 @@ async function getMascotStatus() {
 		const data = await fetch(`/api/users/mascot/status`, {method: 'GET', credentials: 'same-origin'})
 		const pData = await data.json()
 
-		localStorage.setItem('mascotBricked',pData.bricked)
-		sessionStorage.setItem('mascotBricked',pData.bricked)
+		localStorage.setItem('mascotBricked', pData.bricked === -1 ? '-1' : '0')
+		sessionStorage.setItem('mascotBricked', pData.bricked === -1 ? '-1' : '0')
 		localStorage.setItem('handHolding',pData.hand_holding)
 	}
 }

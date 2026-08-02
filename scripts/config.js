@@ -51,7 +51,7 @@ if (window.location.pathname === '/settings') {
         document.getElementById('settings-religion').value = userBio.religion || '';
 
         // Load Privacy
-        const userSeqResponse = await fetch(`/api/users/seq/${userId}`);
+        const userSeqResponse = await fetch(`/api/users/seq/${userId}`, { credentials: 'same-origin' });
         const userSeq = await userSeqResponse.json();
 
         const showFeed = document.getElementById('show-posts-feed');
@@ -67,7 +67,7 @@ if (window.location.pathname === '/settings') {
         document.getElementById('who-chat').value = userSeq.allowMessagesFrom || 0;
 
         // Load Customization
-        const userCustResponse = await fetch(`/api/users/cust/${userId}`);
+        const userCustResponse = await fetch(`/api/users/cust/${userId}`, { credentials: 'same-origin' });
         const userCust = await userCustResponse.json();
 
         if (userCust.customBackground) {
@@ -85,8 +85,10 @@ if (window.location.pathname === '/settings') {
         const bricked = localStorage.getItem('mascotBricked');
         const handHolding = localStorage.getItem('handHolding');
 
-        if (bricked !== null) {
-            mascotToggle.checked = bricked === '1';
+        if (mascotToggle) {
+            mascotToggle.checked = false;
+            mascotToggle.disabled = true;
+            mascotToggle.title = 'Жека включён для всех пользователей';
         }
         if (handHolding !== null) {
             handholdingToggle.checked = handHolding === '1';
@@ -137,7 +139,7 @@ if (window.location.pathname === '/settings') {
         formData.append('religion', document.getElementById('settings-religion').value);
 
         try {
-            const response = await fetch('/api/users/update/bio', { method: 'POST', body: formData });
+            const response = await fetch('/api/users/update/bio', { method: 'POST', credentials: 'same-origin', body: formData });
             const data = await response.json();
             if (data.success) {
                 localStorage.setItem('username', document.getElementById('settings-username').value);
@@ -166,6 +168,7 @@ if (window.location.pathname === '/settings') {
         try {
             const response = await fetch('/api/users/update/seq', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
@@ -187,7 +190,7 @@ const chatCheck = document.getElementById('chat-check').checked ? 1 : 0;
 const newPostCheck = document.getElementById('new-post-check').checked ? 1 : 0;
 const onlineCheck = document.getElementById('online-check').checked ? 1 : 0;
 const friendsCheck = document.getElementById('friend-request-check').checked ? 1 : 0;
-        const mascotBricked = document.getElementById('mascot-toggle').checked;
+        const mascotBricked = false;
         const handHolding = document.getElementById('handholding-toggle').checked;
 
         // Save to localStorage
@@ -211,6 +214,7 @@ formData.append('friend_request_sound', friendsCheck);
             // Save customization
             const custResponse = await fetch('/api/users/update/cust', {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
             });
             const custData = await custResponse.json();
@@ -220,19 +224,13 @@ formData.append('friend_request_sound', friendsCheck);
                 document.body.style.backgroundImage = `url('${custData.customBackground}')`;
             }
 
-            // Toggle mascot brick status
-            const statusResponse = await fetch(`/api/users/mascot/status`, {
-                method: 'GET',
-                credentials: 'same-origin'
+            // Persist the selected mascot visibility explicitly.
+            await fetch('/api/users/mascot/status', {
+                method: 'PUT',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bricked: mascotBricked ? 1 : 0 })
             });
-            const statusData = await statusResponse.json();
-
-            if (statusData.bricked !== (mascotBricked ? 1 : 0)) {
-                await fetch(`/api/users/mascot/status`, {
-                    method: 'POST',
-                    credentials: 'same-origin'
-                });
-            }
 
             // Update handholding
             await fetch(`/api/users/mascot/handholding`, {
@@ -270,7 +268,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const userId = localStorage.getItem('userId');
 
         try {
-            const response = await fetch(`/api/users/cust/${userId}`);
+            const response = await fetch(`/api/users/cust/${userId}`, { credentials: 'same-origin' });
             const newData = await response.json();
             localStorage.setItem('customBg', newData.customBackground);
         } catch (error) {

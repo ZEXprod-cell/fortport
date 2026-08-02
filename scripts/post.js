@@ -157,19 +157,22 @@ function makePostCreator() {
     const currentUserId = localStorage.getItem('userId');
     if (!currentUserId) return;
 
+    if (document.getElementById('new-post-fab')) {
+        return; 
+    }
+
     const path = window.location.pathname;
     const isCommunityPage = path.includes('/community');
     const isProfilePage = path.includes('/profile');
     const isMainPage = path === '/' || path.includes('/main');
 
-    // Check if we're on a community page and get data from communityPageData
     let skipDropdown = false;
     let communityId = null;
     
     if (isCommunityPage && window.communityPageData) {
         skipDropdown = true;
         communityId = window.communityPageData.communityId;
-        // Only create if user can post
+
         if (!window.communityPageData.canPost) {
             return;
         }
@@ -1328,40 +1331,24 @@ function setupPasteSupport() {
 
 async function loadUserCommunities(userId) {
     try {
-        const userResponse = await fetch(`/api/users/${userId}`);
-        const userData = await userResponse.json();
-        const subscribedIds = userData.communities || [];
+        const response = await fetch(`/api/users/${userId}/commIds`);
+        if (!response.ok) throw new Error('Failed to fetch user communities');
         
-        if (subscribedIds.length === 0) return;
+        const communities = await response.json();
         
-        const commsResponse = await fetch('/api/communities/all');
-        const allComms = await commsResponse.json();
-        
-        const canPostIn = allComms.filter(comm => {
-            if (!subscribedIds.includes(comm.id)) return false;
-            if (comm.type === 'community') return true;
-            if (comm.type === 'page') {
-                const isModerator = comm.moderators?.includes(parseInt(userId));
-                const isOwner = comm.owner === parseInt(userId);
-                return isModerator || isOwner;
-            }
-            return false;
+        const selectElement = document.getElementById('creator-community');
+        selectElement.innerHTML = '<option value="">свой профиль</option>';
+
+        communities.forEach(community => {
+            const option = document.createElement('option');
+            option.value = community.id;
+            option.textContent = community.username;
+            selectElement.appendChild(option);
         });
-        
-        const dropdown = document.getElementById('creator-community');
-        if (dropdown) {
-            canPostIn.forEach(comm => {
-                const option = document.createElement('option');
-                option.value = comm.id;
-                option.textContent = comm.username;
-                dropdown.appendChild(option);
-            });
-        }
-    } catch (err) {
-        console.error('Error loading communities:', err);
+    } catch (error) {
+        console.error('Error loading community selector options:', error);
     }
 }
-
 async function handleFileSelect(event) {
     const files = Array.from(event.target.files);
     const previewArea = document.getElementById('files-preview-area');
@@ -1444,11 +1431,16 @@ async function handleFileSelect(event) {
     event.target.value = '';
 }
 
+
+let sending = false;
+
 async function createPost() {
     const content = document.getElementById('post-input').value.trim();
     const spoilerPreview = document.getElementById('spoiler-textarea').value.trim();
     const userId = localStorage.getItem('userId');
-    
+    if (sending == true) {return};
+	sending = true;
+
     if (!content && selectedFiles.length === 0 && !window.pendingPoll) {
         return;
     }
@@ -1467,23 +1459,17 @@ async function createPost() {
     let isAnonymous = false;
     let isSpoiler = false;
     let isNsfw = false;
+        isAnonymous = document.getElementById('anonymous-toggle')?.checked || false;
+        isSpoiler = document.getElementById('spoiler-toggle')?.checked || false;
+        isNsfw = document.getElementById('nsfw-toggle')?.checked || false;
     
     if (isCommunityPage && window.communityPageData) {
         community = window.communityPageData.communityId;
-        isAnonymous = document.getElementById('anonymous-toggle')?.checked || false;
-        isSpoiler = document.getElementById('spoiler-toggle')?.checked || false;
-        isNsfw = document.getElementById('nsfw-toggle')?.checked || false;
     } else if (isProfilePage) {
         community = '';
-        isAnonymous = document.getElementById('anonymous-toggle')?.checked || false;
-        isSpoiler = document.getElementById('spoiler-toggle')?.checked || false;
-        isNsfw = document.getElementById('nsfw-toggle')?.checked || false;
     } else {
         const communityDropdown = document.getElementById('creator-community');
         community = communityDropdown ? (communityDropdown.value ? parseInt(communityDropdown.value) : '') : '';
-        isAnonymous = document.getElementById('anonymous-toggle')?.checked || false;
-        isSpoiler = document.getElementById('spoiler-toggle')?.checked || false;
-        isNsfw = document.getElementById('nsfw-toggle')?.checked || false;
     }
     
     const formData = new FormData();
@@ -1499,7 +1485,6 @@ async function createPost() {
         formData.append('isNsfw', 1);
     }
     
-    // --- ADD POLL DATA ---
     if (window.pendingPoll) {
         formData.append('poll', JSON.stringify(window.pendingPoll));
     }
@@ -1532,11 +1517,10 @@ async function createPost() {
             method: 'POST',
             body: formData
         });
-        
+
         const data = await response.json();
         
         if (data.success) {
-            // Close overlay
             document.getElementById('new-post-overlay').style.display = 'none';
             document.body.style.overflow = '';
             resetPostForm();
@@ -1550,8 +1534,11 @@ async function createPost() {
             } else if (typeof resetAndLoadFeed === 'function') {
                 resetAndLoadFeed();
             }
+		
+	    sending = false;
         } else {
             alert('Ошибка: ' + (data.error || 'Не удалось создать пост'));
+	    sending = false;
             if (postButton) {
                 postButton.disabled = false;
                 postButton.textContent = 'Отправить!';
@@ -1559,6 +1546,7 @@ async function createPost() {
         }
     } catch (err) {
         console.error('Error creating post:', err);
+	    sending = false;
         alert('Ошибка сервера');
         if (postButton) {
             postButton.disabled = false;

@@ -1,25 +1,148 @@
 let communitiesIsSearchMode = false
 let currentCommData = null
 let viewingCommUserId = null
+let communitySearchRequestId = 0
 
 // Get DOM elements
 const communitiesListContainer = document.getElementById('communities-list-container')
 const communitySearchContainer = document.getElementById('community-search-container')
 const communitySearchInput = document.getElementById('community-search-input')
 
+async function fetchJson(url, options = {}) {
+    const response = await fetch(url, {
+        credentials: 'same-origin',
+        ...options
+    })
+    const data = await response.json().catch(() => null)
+
+    if (!response.ok) {
+        throw new Error(data?.error || `HTTP ${response.status}`)
+    }
+    if (data === null) {
+        throw new Error('Сервер вернул некорректный ответ')
+    }
+
+    return data
+}
+
+function getPositiveId(value) {
+    const id = Number(value)
+    return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+function getSafeMediaUrl(value, fallback = '') {
+    if (typeof value !== 'string' || !value.trim()) return fallback
+
+    try {
+        const url = new URL(value, window.location.origin)
+        if (url.origin !== window.location.origin) return fallback
+        if (!['http:', 'https:'].includes(url.protocol)) return fallback
+        return `${url.pathname}${url.search}${url.hash}`
+    } catch {
+        return fallback
+    }
+}
+
+function createElement(tagName, className, text) {
+    const element = document.createElement(tagName)
+    if (className) element.className = className
+    if (text !== undefined) element.textContent = String(text)
+    return element
+}
+
+function createEmptyState(text) {
+    const emptyState = createElement('div', '', text)
+    emptyState.style.textAlign = 'center'
+    emptyState.style.padding = '30px'
+    emptyState.style.color = '#666'
+    return emptyState
+}
+
+function createCommunityCard(comm, action) {
+    const communityId = getPositiveId(comm?.id)
+    if (!communityId) return null
+
+    const card = createElement('div', 'friend-card')
+    const avatar = createElement(
+        'img',
+        'friend-card-avatar frutiger-aero-border'
+    )
+    avatar.src = getSafeMediaUrl(
+        comm.profilePicture,
+        '/default-avatar.jpg'
+    )
+    avatar.alt = ''
+
+    const info = createElement('div', 'friend-card-info')
+    info.style.display = 'flex'
+    info.style.flexDirection = 'column'
+    info.style.gap = '4px'
+
+    const name = createElement(
+        'a',
+        'friend-card-name',
+        comm.username || 'Без названия'
+    )
+    name.href = `/community?id=${communityId}`
+    info.append(
+        name,
+        createElement(
+            'span',
+            'friend-card-type',
+            comm.type === 'community' ? 'сообщество' : 'страница'
+        )
+    )
+
+    if (comm.subCount !== undefined) {
+        const subCount = Number(comm.subCount) || 0
+        info.appendChild(
+            createElement(
+                'span',
+                'friend-card-subcount',
+                `${subCount} ${
+                    comm.type === 'community'
+                        ? 'Участников'
+                        : 'Подписчиков'
+                }`
+            )
+        )
+    }
+
+    card.append(avatar, info)
+
+    if (action === 'join' || action === 'leave') {
+        const button = createElement(
+            'button',
+            'friend-card-btn',
+            action === 'join' ? 'Подключиться' : 'Отключить'
+        )
+        button.type = 'button'
+        button.addEventListener('click', () => {
+            if (action === 'join') {
+                joinCommunity(communityId)
+            } else {
+                leaveCommunity(communityId)
+            }
+        })
+        card.appendChild(button)
+    }
+
+    return card
+}
+
 function loadCommData(userId) {
-    if (!userId) {
-        const currentUserId = localStorage.getItem('userId')
-        if (!currentUserId) {
+    let targetUserId = getPositiveId(userId)
+    if (!targetUserId) {
+        targetUserId = getPositiveId(localStorage.getItem('userId'))
+        if (!targetUserId) {
             window.location.href = '/login'
             return
         }
-        userId = parseInt(currentUserId)
     }
-    
-    viewingCommUserId = userId
-    const currentUserId = parseInt(localStorage.getItem('userId'))
-    const isOwnProfile = (userId === currentUserId)
+
+    viewingCommUserId = targetUserId
+    const currentUserId = getPositiveId(localStorage.getItem('userId'))
+    const isOwnProfile = targetUserId === currentUserId
 
 const createButton = document.getElementById('create-community-button');
 if (createButton) {
@@ -32,10 +155,11 @@ if (createButton) {
         if (isOwnProfile) {
             myPortsLabel.textContent = 'Мои порты'
         } else {
-            fetch(`/api/users/${userId}`)
-                .then(r => r.json())
+            fetchJson(`/api/users/${targetUserId}`)
                 .then(user => {
-                    myPortsLabel.textContent = `Порты ${user.username}`
+                    myPortsLabel.textContent = `Порты ${
+                        user?.username || 'пользователя'
+                    }`
                 })
                 .catch(() => {
                     myPortsLabel.textContent = 'Порты пользователя'
@@ -49,15 +173,11 @@ if (createButton) {
     }
     
     // Choose correct endpoint
-    const apiUrl = isOwnProfile 
-        ? `/api/user/communities/${userId}` 
-        : `/api/users/${userId}/communities`
-    
-    fetch(apiUrl)
-        .then(r => {
-            if (!r.ok) throw new Error('Network error')
-            return r.json()
-        })
+    const apiUrl = isOwnProfile
+        ? `/api/user/communities/${targetUserId}`
+        : `/api/users/${targetUserId}/communities`
+
+    fetchJson(apiUrl)
         .then(data => {
             let communities = []
             if (isOwnProfile) {
@@ -115,21 +235,36 @@ function setupSearch() {
 }
 
 function performCommunitySearch(query) {
-    if (!query || query.length < 2) return
-    
-    fetch(`/api/communities/search?q=${encodeURIComponent(query)}`)
-        .then(r => r.json())
+    const normalizedQuery = String(query || '').trim()
+    if (normalizedQuery.length < 2) return
+
+    const requestId = ++communitySearchRequestId
+    fetchJson(
+        `/api/communities/search?q=${encodeURIComponent(normalizedQuery)}`
+    )
         .then(communities => {
-            displayCommunitySearchResults(communities)
+            if (requestId !== communitySearchRequestId) return
+            displayCommunitySearchResults(
+                Array.isArray(communities) ? communities : []
+            )
             communitiesIsSearchMode = true
-            
-            if (communitiesListContainer) communitiesListContainer.style.display = 'none'
-            if (communitySearchContainer) communitySearchContainer.style.display = 'block'
+
+            if (communitiesListContainer) {
+                communitiesListContainer.style.display = 'none'
+            }
+            if (communitySearchContainer) {
+                communitySearchContainer.style.display = 'block'
+            }
         })
-        .catch(err => console.error('Search error:', err))
+        .catch(err => {
+            if (requestId === communitySearchRequestId) {
+                console.error('Search error:', err)
+            }
+        })
 }
 
 function exitCommunitySearchMode() {
+    communitySearchRequestId += 1
     communitiesIsSearchMode = false
     if (communitiesListContainer) communitiesListContainer.style.display = 'block'
     if (communitySearchContainer) communitySearchContainer.style.display = 'none'
@@ -139,164 +274,130 @@ function exitCommunitySearchMode() {
 function displayCommunitySearchResults(communities) {
     const container = document.getElementById('community-search-list')
     if (!container) return
-    
-    container.innerHTML = ''
-    
-    if (!communities || communities.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 30px; color: #666;">Порты не найдены</div>'
+
+    container.replaceChildren()
+
+    if (!Array.isArray(communities) || communities.length === 0) {
+        container.appendChild(createEmptyState('Порты не найдены'))
         return
     }
-    
-    const currentUserId = parseInt(localStorage.getItem('userId'))
-    const subscribedCommunityIds = currentCommData?.communities?.map(c => c.id) || []
-    
+
+    const subscribedCommunityIds = new Set(
+        (currentCommData?.communities || [])
+            .map(comm => getPositiveId(comm?.id))
+            .filter(Boolean)
+    )
+
     communities.forEach(comm => {
-        const isSubscribed = subscribedCommunityIds.includes(comm.id)
-        const commCard = document.createElement('div')
-        commCard.classList.add('friend-card')
-        commCard.innerHTML = `
-            <img src="${comm.profilePicture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
-            <div class="friend-card-info" style="display: flex; flex-direction: column; gap: 4px;">
-                <a href="/community?id=${comm.id}" class="friend-card-name">${escapeHtml(comm.username)}</a>
-                <span class="friend-card-type">${comm.type === 'community' ? 'сообщество' : 'страница'}</span>
-                <span class="friend-card-subcount">${comm.subCount || 0} ${comm.type === 'community' ? 'Участников' : 'Подписчиков'}</span>
-            </div>
-            ${isSubscribed 
-                ? `<button class="friend-card-btn" onclick="leaveCommunity(${comm.id})">Отключить</button>`
-                : `<button class="friend-card-btn" onclick="joinCommunity(${comm.id})">Подключиться</button>`
-            }
-        `
-        container.appendChild(commCard)
+        const communityId = getPositiveId(comm?.id)
+        const card = createCommunityCard(
+            comm,
+            subscribedCommunityIds.has(communityId) ? 'leave' : 'join'
+        )
+        if (card) container.appendChild(card)
     })
 }
 
 function displayComms(communities, showButtons = true) {
     const container = document.getElementById('communities-list')
     if (!container) return
-    
-    container.innerHTML = ''
-    
-    if (!communities || communities.length === 0) {
-        container.innerHTML = '<div style="text-align: center; padding: 30px; color: #666;">' 
-            + (showButtons ? 'Нет подключённых портов!' : 'У пользователя нет портов') 
-            + '</div>'
+
+    container.replaceChildren()
+
+    if (!Array.isArray(communities) || communities.length === 0) {
+        container.appendChild(
+            createEmptyState(
+                showButtons
+                    ? 'Нет подключённых портов!'
+                    : 'У пользователя нет портов'
+            )
+        )
         return
     }
-    
+
     communities.forEach(comm => {
-        const commCard = document.createElement('div')
-        commCard.classList.add('friend-card')
-        
-        let buttonsHtml = ''
-        if (showButtons) {
-            buttonsHtml = `<button class="friend-card-btn" onclick="leaveCommunity(${comm.id})">Отключить</button>`
-        }
-        
-        const subCount = comm.subCount !== undefined ? comm.subCount : 0
-        const subText = comm.subCount !== undefined 
-            ? `${subCount} ${comm.type === 'community' ? 'Участников' : 'Подписчиков'}`
-            : ''
-        
-        commCard.innerHTML = `
-            <img src="${comm.profilePicture || '/default-avatar.jpg'}" class="friend-card-avatar frutiger-aero-border">
-            <div class="friend-card-info" style="display: flex; flex-direction: column; gap: 4px;">
-                <a href="/community?id=${comm.id}" class="friend-card-name">${escapeHtml(comm.username)}</a>
-                <span class="friend-card-type">${comm.type === 'community' ? 'сообщество' : 'страница'}</span>
-                ${subText ? `<span class="friend-card-subcount">${subText}</span>` : ''}
-            </div>
-            ${buttonsHtml}
-        `
-        
-        container.appendChild(commCard)
+        const card = createCommunityCard(
+            comm,
+            showButtons ? 'leave' : null
+        )
+        if (card) container.appendChild(card)
     })
 }
 
-function joinCommunity(communityId) {
-    const userId = localStorage.getItem('userId')
+async function joinCommunity(communityId) {
+    const userId = getPositiveId(localStorage.getItem('userId'))
+    const targetCommunityId = getPositiveId(communityId)
     if (!userId) {
         window.location.href = '/login'
         return
     }
-    
-    fetch(`/api/communities/${communityId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-        // No body needed; authenticate middleware gets userId from session
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            loadCommData(parseInt(userId))
-            exitCommunitySearchMode()
-        } else {
-            alert('Ошибка: ' + (data.error || 'Не удалось подключиться'))
+    if (!targetCommunityId) return
+
+    try {
+        const data = await fetchJson(
+            `/api/communities/${targetCommunityId}/join`,
+            { method: 'POST' }
+        )
+        if (!data.success) {
+            throw new Error(data.error || 'Не удалось подключиться')
         }
-    })
-    .catch(err => console.error('Error joining community:', err))
+        loadCommData(userId)
+        exitCommunitySearchMode()
+    } catch (err) {
+        console.error('Error joining community:', err)
+        alert(`Ошибка: ${err.message || 'Не удалось подключиться'}`)
+    }
 }
 
-function leaveCommunity(communityId) {
-    const userId = localStorage.getItem('userId')
-    if (!userId) return
-    
+async function leaveCommunity(communityId) {
+    const userId = getPositiveId(localStorage.getItem('userId'))
+    const targetCommunityId = getPositiveId(communityId)
+    if (!userId || !targetCommunityId) return
     if (!confirm('Отключиться от этого порта?')) return
-    
-    fetch(`/api/communities/${communityId}/leave`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            loadCommData(parseInt(userId))
-            if (communitiesIsSearchMode) exitCommunitySearchMode()
-        } else {
-            alert('Ошибка: ' + (data.error || 'Не удалось отключиться'))
-        }
-    })
-    .catch(err => console.error('Error leaving community:', err))
-}
 
-function escapeHtml(str) {
-    if (!str) return ''
-    return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
+    try {
+        const data = await fetchJson(
+            `/api/communities/${targetCommunityId}/leave`,
+            { method: 'POST' }
+        )
+        if (!data.success) {
+            throw new Error(data.error || 'Не удалось отключиться')
+        }
+        loadCommData(userId)
+        if (communitiesIsSearchMode) exitCommunitySearchMode()
+    } catch (err) {
+        console.error('Error leaving community:', err)
+        alert(`Ошибка: ${err.message || 'Не удалось отключиться'}`)
+    }
 }
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search)
     const userIdParam = urlParams.get('id')
-    const currentUserId = localStorage.getItem('userId')
-    
-    let targetUserId
-    if (userIdParam) {
-        targetUserId = parseInt(userIdParam)
-    } else {
-        targetUserId = currentUserId ? parseInt(currentUserId) : null
-    }
-    
+    const currentUserId = getPositiveId(localStorage.getItem('userId'))
+    const targetUserId = getPositiveId(userIdParam) || currentUserId
+
     if (!targetUserId) {
         window.location.href = '/login'
         return
     }
-    
+
     setupSearch()
     loadCommData(targetUserId)
+
     if (window.location.pathname.includes('/communities')) {
-    fetch(`/api/users/bio/${viewingUserId}`)
-        .then(r => r.json())
-        .then(userBio => {
-            if (userBio.profileBackground) {
-                document.body.style.backgroundImage = `url(${userBio.profileBackground})`;
-            }
-        })
-        .catch(() => {});
-}
+        fetchJson(`/api/users/bio/${targetUserId}`)
+            .then(userBio => {
+                const profileBackground = getSafeMediaUrl(
+                    userBio?.profileBackground
+                )
+                document.body.style.backgroundImage = profileBackground
+                    ? `url("${profileBackground.replace(/"/g, '%22')}")`
+                    : ''
+            })
+            .catch(() => {})
+    }
 })
 
 // Make functions global

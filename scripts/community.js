@@ -5,8 +5,10 @@ import * as PostDisplay from './display-post.js'
 function debug(msg) {
     const debugDiv = document.getElementById('debug-messages');
     if (debugDiv) {
+        const entry = document.createElement('div');
         const timestamp = new Date().toLocaleTimeString();
-        debugDiv.innerHTML += `<div>${timestamp}: ${msg}</div>`;
+        entry.textContent = `${timestamp}: ${String(msg)}`;
+        debugDiv.appendChild(entry);
         debugDiv.scrollTop = debugDiv.scrollHeight;
         while (debugDiv.children.length > 20) {
             debugDiv.removeChild(debugDiv.firstChild);
@@ -39,22 +41,50 @@ if (!sessionStorage.getItem('userId')) {
 }
 
 const urlParams = new URLSearchParams(window.location.search)
-const communityId = urlParams.get('id')
+const communityId = Number(urlParams.get('id'))
+const hasValidCommunityId =
+  Number.isSafeInteger(communityId) && communityId > 0
 
-if (!communityId) {
-  debug('No community ID provided')
-  window.location.href = '/'
+if (!hasValidCommunityId) {
+  debug('No valid community ID provided')
+  window.location.replace('/')
 }
 
-function escapeHtml(str) {
-  if (!str) return ''
-  const string = String(str)
-  return string
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: 'same-origin',
+    ...options
+  })
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(data?.error || `HTTP ${response.status}`)
+  }
+  if (data === null) {
+    throw new Error('Сервер вернул некорректный ответ')
+  }
+
+  return data
+}
+
+function getSafeMediaUrl(value, fallback = '') {
+  if (typeof value !== 'string' || !value.trim()) return fallback
+
+  try {
+    const url = new URL(value, window.location.origin)
+    if (url.origin !== window.location.origin) return fallback
+    if (!['http:', 'https:'].includes(url.protocol)) return fallback
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return fallback
+  }
+}
+
+function createElement(tagName, className, text) {
+  const element = document.createElement(tagName)
+  if (className) element.className = className
+  if (text !== undefined) element.textContent = String(text)
+  return element
 }
 
 function loadCommunity() {
@@ -66,22 +96,27 @@ function loadCommunity() {
   
   // Load community info and first batch of posts
   Promise.all([
-    fetch(`/api/communities/${communityId}`).then(r => r.json()),
-    fetch(`/api/communities/${communityId}/posts`).then(r => r.json())
+    fetchJson(`/api/communities/${communityId}`),
+    fetchJson(`/api/communities/${communityId}/posts`)
   ])
   .then(([community, posts]) => {
-    debug(`Community loaded: ${community ? community.username : 'null'}`);
-    debug(`Posts loaded: ${posts ? posts.length : 'null'}`);
-    
-    if (community.error) throw new Error(community.error);
-    
-    if (community.profileBackground) {
-      const body = document.body
-      body.style.backgroundImage = `url(${community.profileBackground})`
+    if (!community || typeof community !== 'object' || Array.isArray(community)) {
+      throw new Error('Некорректные данные порта')
     }
-    
+    if (!Array.isArray(posts)) {
+      throw new Error('Некорректные данные публикаций')
+    }
+
+    debug(`Community loaded: ${community.username || 'Без названия'}`);
+    debug(`Posts loaded: ${posts.length}`);
+
+    const profileBackground = getSafeMediaUrl(community.profileBackground)
+    document.body.style.backgroundImage = profileBackground
+      ? `url("${profileBackground.replace(/"/g, '%22')}")`
+      : ''
+
     currentCommunity = community;
-    document.title = currentCommunity.username
+    document.title = String(currentCommunity.username || 'FortPort')
     
     // SET PAGE-WIDE PARAMS
     const currentUserId = parseInt(localStorage.getItem('userId'))
@@ -91,13 +126,16 @@ function loadCommunity() {
     
     window.communityPageData = {
         isCommunityPage: true,
-        communityId: parseInt(communityId),
+        communityId,
         communityType: community.type,
-        canPost: canPost,
-        isOwner: isOwner,
-        isModerator: isModerator,
-        communityName: community.username,
-        communityAvatar: community.profilePicture || '/default-avatar.jpg'
+        canPost,
+        isOwner,
+        isModerator,
+        communityName: String(community.username || 'Без названия'),
+        communityAvatar: getSafeMediaUrl(
+          community.profilePicture,
+          '/default-avatar.jpg'
+        )
     }
 
     if (currentUserId && canPost) {
@@ -111,7 +149,7 @@ function loadCommunity() {
     if (posts.length > 0) {
         currentLastPostId = posts[posts.length - 1].id;
     }
-    if (posts.length < 50) {
+    if (posts.length < 15) {
         hasMorePosts = false;
     }
     displayCommunityPosts(allPosts);
@@ -120,7 +158,19 @@ function loadCommunity() {
     debug(`ERROR: ${err.message}`);
     const contentDiv = document.getElementById('community-content');
     if (contentDiv) {
-      contentDiv.innerHTML = `<div style="text-align: center; padding: 40px; color: #ff4444;">Порт не найден<br><small>${err.message}</small></div>`;
+      const errorBox = createElement('div', 'community-load-error')
+      errorBox.style.textAlign = 'center'
+      errorBox.style.padding = '40px'
+      errorBox.style.color = '#ff4444'
+      errorBox.appendChild(createElement('div', '', 'Порт не найден'))
+      errorBox.appendChild(
+        createElement(
+          'small',
+          '',
+          err instanceof Error ? err.message : 'Неизвестная ошибка'
+        )
+      )
+      contentDiv.replaceChildren(errorBox)
     }
   })
 }
@@ -155,15 +205,17 @@ function displayCommunityPosts(posts, append = false) {
 // Load more community posts
 async function loadMoreCommunityPosts() {
     if (isLoading || !hasMorePosts) return;
-    
+    console.log('SHIT')
     isLoading = true;
     
     try {
-        const url = `/api/communities/${communityId}/posts?before=${currentLastPostId}&limit=50`;
-        const response = await fetch(url);
-        const newPosts = await response.json();
-        
-        if (!newPosts || newPosts.length === 0) {
+        const url = `/api/communities/${communityId}/posts?before=${encodeURIComponent(currentLastPostId)}&limit=15`;
+        const newPosts = await fetchJson(url);
+
+        if (!Array.isArray(newPosts)) {
+            throw new Error('Некорректные данные публикаций');
+        }
+        if (newPosts.length === 0) {
             hasMorePosts = false;
             isLoading = false;
             return;
@@ -174,7 +226,7 @@ async function loadMoreCommunityPosts() {
         allPosts = [...allPosts, ...newPosts];
         currentLastPostId = newPosts[newPosts.length - 1].id;
         
-        if (newPosts.length < 50) {
+        if (newPosts.length < 15) {
             hasMorePosts = false;
         }
         
@@ -189,51 +241,154 @@ async function loadMoreCommunityPosts() {
 }
 
 function displayCommunity(community) {
-  let canEdit = false
-  const currentUserId = parseInt(localStorage.getItem('userId'))
-  const isSubscribed = community.subscribers?.includes(currentUserId)
-  const isOwner = community.owner === currentUserId
-  const isModerator = community.moderators?.includes(currentUserId)
-  canEdit = isOwner || isModerator
+  const content = document.getElementById('community-content')
+  if (!content) return
 
-  document.getElementById('community-content').innerHTML = `
-    <div class="profile-header">
-	<div class="profile-header-contents">
-		<div class="profile-header-left">
-			<div class="profile-pfp">
-				<img src="${community.profilePicture || '/default-avatar.jpg'}" class="profile-picture frutiger-aero-border" style="border-radius:0; border: 6px solid rgb(255 255 255); box-shadow: 4px 4px 18px #0000008f; background:white; cursor:pointer;" onclick="openProfilePicture('${community.profilePicture || ''}')">
-			</div>
-			<div class="profile-left-buttons" id="profile-buttons">
-            			
-				${canEdit ? `<button class="profile-btn-btn" style="margin-bottom: 55px;" onclick="window.location.href='/community/settings?id=${community.id}';">Редактировать</button>` : `
-${isSubscribed ? `<button class="profile-btn-btn" onclick="unsubscribeFromCommunity(${community.id})" style="margin-bottom: 55px;">Отключиться</button>` : `<button class="profile-btn-btn" onclick="subscribeToCommunity(${community.id})" style="margin-bottom: 55px;">Присоединиться</button>` }
-			`}
-			</div>
-		</div>
-		<div class="profile-header-right">
-			<div class="profile-right-name"><p>${community.username}</p></div>
-			${community.status ? `<div class="profile-right-status">${community.status}</div>` : ``}
-			${community.description ? `<div class="profile-right-description">${community.description}</div>` : ``}
-			<div class="community-header-right-type">${community.type == 'page' ? `Страница` : `Сообщество`}</div>
-			<div class="community-header-right-bday">Порт создан: ${new Date(community.createdAt).toLocaleDateString('en-GB').replace(/\//g, '-')}</div>
-			<div class="community-header-subs"><label>Подписчиков:</label><p>${community.subscriberCount}</p></div>
-		</div>
-		<div class="profile-header-morethings" onclick="openMore()">Правила</div>
-	</div>
-    </div>
-    <div class="profile-neck">
-	<div class="profile-neck-left"><ul class="rules-list" id="rules-list">
-  ${community.rules 
-    ? community.rules.split('\n').filter(rule => rule.trim() !== '').map(rule => `<li>${escapeHtml(rule)}</li>`).join('')
-    : '<li>Правила не установлены</li>'
+  const currentUserId = Number(localStorage.getItem('userId'))
+  const subscribers = Array.isArray(community.subscribers)
+    ? community.subscribers.map(Number)
+    : []
+  const moderators = Array.isArray(community.moderators)
+    ? community.moderators.map(Number)
+    : []
+  const ownerId = Number(community.owner)
+  const safeCommunityId = Number(community.id)
+  const isSubscribed = subscribers.includes(currentUserId)
+  const isOwner = ownerId === currentUserId
+  const isModerator = moderators.includes(currentUserId)
+  const canEdit = isOwner || isModerator
+  const profilePicture = getSafeMediaUrl(
+    community.profilePicture,
+    '/default-avatar.jpg'
+  )
+
+  const header = createElement('div', 'profile-header')
+  const headerContents = createElement('div', 'profile-header-contents')
+  const headerLeft = createElement('div', 'profile-header-left')
+  const pictureContainer = createElement('div', 'profile-pfp')
+  const picture = createElement(
+    'img',
+    'profile-picture frutiger-aero-border'
+  )
+  picture.src = profilePicture
+  picture.alt = `Изображение порта ${String(community.username || '')}`
+  picture.style.borderRadius = '0'
+  picture.style.border = '6px solid rgb(255 255 255)'
+  picture.style.boxShadow = '4px 4px 18px #0000008f'
+  picture.style.background = 'white'
+  picture.style.cursor = 'pointer'
+  picture.addEventListener('click', () => {
+    if (typeof window.openProfilePicture === 'function') {
+      window.openProfilePicture(profilePicture)
+    }
+  })
+  pictureContainer.appendChild(picture)
+
+  const buttons = createElement('div', 'profile-left-buttons')
+  buttons.id = 'profile-buttons'
+  const actionButton = createElement('button', 'profile-btn-btn')
+  actionButton.type = 'button'
+  actionButton.style.marginBottom = '55px'
+
+  if (canEdit) {
+    actionButton.textContent = 'Редактировать'
+    actionButton.addEventListener('click', () => {
+      if (Number.isSafeInteger(safeCommunityId) && safeCommunityId > 0) {
+        window.location.href = `/community/settings?id=${safeCommunityId}`
+      }
+    })
+  } else if (isSubscribed) {
+    actionButton.textContent = 'Отключиться'
+    actionButton.addEventListener('click', () => {
+      unsubscribeFromCommunity(safeCommunityId)
+    })
+  } else {
+    actionButton.textContent = 'Присоединиться'
+    actionButton.addEventListener('click', () => {
+      subscribeToCommunity(safeCommunityId)
+    })
   }
-</ul>
-	</div>
-	<div class="profile-neck-right">
-    	</div>
-    </div>
-    <div class="profile-header-lessthings" onclick="closeMore()">Скрыть</div>
-  `
+
+  buttons.appendChild(actionButton)
+  headerLeft.append(pictureContainer, buttons)
+
+  const headerRight = createElement('div', 'profile-header-right')
+  const nameContainer = createElement('div', 'profile-right-name')
+  nameContainer.appendChild(
+    createElement('p', '', community.username || 'Без названия')
+  )
+  headerRight.appendChild(nameContainer)
+
+  if (community.status) {
+    headerRight.appendChild(
+      createElement('div', 'profile-right-status', community.status)
+    )
+  }
+  if (community.description) {
+    headerRight.appendChild(
+      createElement(
+        'div',
+        'profile-right-description',
+        community.description
+      )
+    )
+  }
+
+  headerRight.appendChild(
+    createElement(
+      'div',
+      'community-header-right-type',
+      community.type === 'page' ? 'Страница' : 'Сообщество'
+    )
+  )
+
+  const createdAt = new Date(community.createdAt)
+  const createdAtText = Number.isNaN(createdAt.getTime())
+    ? 'неизвестно'
+    : createdAt.toLocaleDateString('ru-RU')
+  headerRight.appendChild(
+    createElement(
+      'div',
+      'community-header-right-bday',
+      `Порт создан: ${createdAtText}`
+    )
+  )
+
+  const subscribersRow = createElement('div', 'community-header-subs')
+  subscribersRow.append(
+    createElement('label', '', 'Подписчиков:'),
+    createElement('p', '', Number(community.subscriberCount) || 0)
+  )
+  headerRight.appendChild(subscribersRow)
+
+  const rulesOpen = createElement(
+    'button',
+    'profile-header-morethings',
+    'Правила'
+  )
+  rulesOpen.type = 'button'
+  rulesOpen.addEventListener('click', openMore)
+
+  headerContents.append(headerLeft, headerRight, rulesOpen)
+  header.appendChild(headerContents)
+
+  const neck = createElement('div', 'profile-neck')
+  const neckLeft = createElement('div', 'profile-neck-left')
+  const rulesList = createElement('ul', 'rules-list')
+  rulesList.id = 'rules-list'
+  renderRules(rulesList, community.rules)
+  neckLeft.appendChild(rulesList)
+  neck.append(neckLeft, createElement('div', 'profile-neck-right'))
+
+  const rulesClose = createElement(
+    'button',
+    'profile-header-lessthings',
+    'Скрыть'
+  )
+  rulesClose.type = 'button'
+  rulesClose.addEventListener('click', closeMore)
+
+  content.replaceChildren(header, neck, rulesClose)
 }
 
 function openMore() {
@@ -258,66 +413,74 @@ function closeMore() {
 	somethings.forEach(el => el.style.transform = '');
 }
 
-function displayRules(rulesText, canEdit) {
-  const rulesList = document.getElementById('rules-list')
-  
-  if (!rulesText) {
-    rulesList.innerHTML = '<li>Правила не установлены</li>'
-    return
-  }
-  
-  const rules = rulesText.split('\n').filter(rule => rule.trim() !== '')
-  
+function renderRules(rulesList, rulesText) {
+  const rules = typeof rulesText === 'string'
+    ? rulesText.split('\n').map(rule => rule.trim()).filter(Boolean)
+    : []
+
   if (rules.length === 0) {
-    rulesList.innerHTML = '<li>Правила не установлены</li>'
+    rulesList.replaceChildren(
+      createElement('li', '', 'Правила не установлены')
+    )
     return
   }
-  
-  rulesList.innerHTML = rules.map(rule => `<li>${escapeHtml(rule)}</li>`).join('')
+
+  rulesList.replaceChildren(
+    ...rules.map(rule => createElement('li', '', rule))
+  )
 }
 
-async function subscribeToCommunity(communityId) {
+function displayRules(rulesText) {
+  const rulesList = document.getElementById('rules-list')
+  if (rulesList) renderRules(rulesList, rulesText)
+}
+
+async function subscribeToCommunity(targetCommunityId) {
   const userId = localStorage.getItem('userId')
   if (!userId) {
-    window.location.href = '/login.html'
+    window.location.href = '/login'
     return
   }
+  if (!Number.isSafeInteger(targetCommunityId) || targetCommunityId <= 0) {
+    alert('Некорректный идентификатор порта')
+    return
+  }
+
   try {
-    const response = await fetch(`/api/communities/${communityId}/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId })
-    })
-    const data = await response.json()
-    if (data.success) {
-      loadCommunity()
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось подписаться'))
+    const data = await fetchJson(
+      `/api/communities/${targetCommunityId}/join`,
+      { method: 'POST' }
+    )
+    if (!data.success) {
+      throw new Error(data.error || 'Не удалось подписаться')
     }
+    loadCommunity()
   } catch (err) {
     console.error('Error subscribing:', err)
-    alert('Ошибка сервера')
+    alert(`Ошибка: ${err.message || 'Ошибка сервера'}`)
   }
 }
 
-async function unsubscribeFromCommunity(communityId) {
+async function unsubscribeFromCommunity(targetCommunityId) {
   const userId = localStorage.getItem('userId')
   if (!userId) return
+  if (!Number.isSafeInteger(targetCommunityId) || targetCommunityId <= 0) {
+    alert('Некорректный идентификатор порта')
+    return
+  }
+
   try {
-    const response = await fetch(`/api/communities/${communityId}/leave`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId })
-    })
-    const data = await response.json()
-    if (data.success) {
-      loadCommunity()
-    } else {
-      alert('Ошибка: ' + (data.error || 'Не удалось отписаться'))
+    const data = await fetchJson(
+      `/api/communities/${targetCommunityId}/leave`,
+      { method: 'POST' }
+    )
+    if (!data.success) {
+      throw new Error(data.error || 'Не удалось отписаться')
     }
+    loadCommunity()
   } catch (err) {
     console.error('Error unsubscribing:', err)
-    alert('Ошибка сервера')
+    alert(`Ошибка: ${err.message || 'Ошибка сервера'}`)
   }
 }
 
@@ -340,5 +503,7 @@ window.subscribeToCommunity = subscribeToCommunity
 window.unsubscribeFromCommunity = unsubscribeFromCommunity
 window.loadCommunity = loadCommunity
 
-loadCommunity();
-setupCommunityScrollListener();
+if (hasValidCommunityId) {
+  loadCommunity()
+  setupCommunityScrollListener()
+}

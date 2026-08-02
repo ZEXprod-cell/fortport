@@ -1,6 +1,4 @@
 // profile.js
-import * as PostDisplay from './display-post.js';
-
 let currentProfileUser = null
 let isEditing = false
 let newProfilePicture = null
@@ -71,7 +69,10 @@ async function loadFriendsList() {
             html += `
                 <a href="/profile?id=${friend.id}" class="sub-sub-item">
                     <img src="${friend.profilePicture || '/default-avatar.jpg'}" class="sub-sub-avatar">
-                    <span class="sub-sub-name">${escapeHtml(friend.username)}</span>
+                    <span class="role-identity-line sub-sub-name-line">
+                        <span class="sub-sub-name role-name${friend.displayRole ? ` role-name-${friend.displayRole}` : ''}">${escapeHtml(friend.username)}</span>
+                        ${window.FortPortRoles?.badgeHtml(friend, { compact: true }) || ''}
+                    </span>
                 </a>
             `;
         });
@@ -202,7 +203,7 @@ function loadProfile() {
     if (posts.length > 0) {
         currentLastPostId = posts[posts.length - 1].id;
     }
-    if (posts.length < 50) {
+    if (posts.length < 15) {
         hasMorePosts = false;
     }
     displayUserPosts(allPosts);
@@ -223,7 +224,23 @@ function displayProfile(user) {
 }
 
 async function renderProfile(user, isOwnProfile) {
-  const currentUserId = await localStorage.getItem('userId')
+  const currentUserId = localStorage.getItem('userId')
+  let capabilities = window.sessionBootstrap?.user || {
+    isAdmin: localStorage.getItem('isAdmin') === 'true',
+    isDeveloper: localStorage.getItem('isDeveloper') === 'true',
+    isModerator: false
+  }
+  if (currentUserId && !window.sessionBootstrap) {
+    try {
+      const capabilityResponse = await fetch('/api/isAdmin', { credentials: 'same-origin' })
+      if (capabilityResponse.ok) capabilities = await capabilityResponse.json()
+    } catch (error) {
+      console.error('Profile capability check failed:', error)
+    }
+  }
+  const canModerateProfile = Boolean(
+    capabilities.isAdmin || capabilities.isDeveloper || capabilities.isModerator
+  )
   	const userBioResponse = await fetch(`/api/users/bio/${userId}`);
 	const userBio = await userBioResponse.json();
 
@@ -247,8 +264,13 @@ async function renderProfile(user, isOwnProfile) {
 			<div class="profile-left-buttons" id="profile-buttons"></div>
 		</div>
 		<div class="profile-header-right">
-			<div class="profile-right-name"><p>${user.username}</p></div>
-			${user.status ? `<div class="profile-right-status">${user.status}</div>` : ``}
+			<div class="profile-right-name">
+                <span class="role-identity-line profile-name-line">
+                    <span class="profile-name-text role-name${user.displayRole ? ` role-name-${user.displayRole}` : ''}">${escapeHtml(user.username)}</span>
+                    ${window.FortPortRoles?.badgeHtml(user, { profile: true }) || ''}
+                </span>
+            </div>
+			${user.status ? `<div class="profile-right-status">${escapeHtml(user.status)}</div>` : ``}
 			${userBio.description ? `<div class="profile-right-description">${userBio.description}</div>` : ``}
 			${userBio.homeCountry ? `<div class="profile-right-homecountry"><img src="/ui/icons/mini_map.webp" style="height:30px; position:absolute; left:10px; bottom:5px;">${userBio.homeCountry}</div>` : ``}
 			${userBio.dateOfBirth ? `<div class="profile-right-birthday"><img src="/ui/icons/mini_cake.webp" style="height:30px; position:absolute; right:10px; bottom:5px;">${userBio.dateOfBirth}</div>` : ``}
@@ -310,6 +332,15 @@ async function renderProfile(user, isOwnProfile) {
     return
   }
 
+  if (!isOwnProfile && canModerateProfile) {
+    const moderationButton = document.createElement('button')
+    moderationButton.type = 'button'
+    moderationButton.className = 'profile-btn-btn profile-reset-avatar-btn'
+    moderationButton.textContent = 'Сбросить аватар'
+    moderationButton.addEventListener('click', () => resetUserAvatar(user.id, user.username))
+    document.getElementById('profile-buttons').appendChild(moderationButton)
+  }
+
   if (!isOwnProfile && currentUserId) {
     fetch(`/api/users/${currentUserId}`)
       .then(r => r.json())
@@ -369,6 +400,35 @@ async function renderProfile(user, isOwnProfile) {
   }
 }
 
+async function resetUserAvatar(targetUserId, username) {
+  const confirmed = window.confirm(`Сбросить аватар пользователя ${username} на стандартный?`)
+  if (!confirmed) return
+
+  const button = document.querySelector('.profile-reset-avatar-btn')
+  if (button) button.disabled = true
+
+  try {
+    const response = await fetch(`/api/mod/users/${encodeURIComponent(targetUserId)}/avatar`, {
+      method: 'DELETE',
+      credentials: 'same-origin'
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Не удалось сбросить аватар')
+    }
+
+    const picture = document.querySelector('.profile-picture')
+    if (picture) {
+      picture.src = '/default-avatar.jpg'
+      picture.onclick = null
+    }
+    if (button) button.textContent = 'Аватар сброшен'
+  } catch (error) {
+    if (button) button.disabled = false
+    window.alert(error.message)
+  }
+}
+
 function openMore() {
 	const neck = document.querySelector('.profile-neck')
 	neck.classList.add('open')
@@ -391,6 +451,8 @@ function closeMore() {
 	somethings.forEach(el => el.style.transform = '');
 }
 
+import * as PostDisplay from './display-post.js'
+
 function displayUserPosts(posts, append = false) {
   PostDisplay.loadUserMap().then(() => {
     if (append) {
@@ -408,7 +470,7 @@ async function loadMoreProfilePosts() {
     isLoading = true;
     
     try {
-        const url = `/api/users/${userId}/posts?before=${currentLastPostId}&limit=50`;
+        const url = `/api/users/${userId}/posts?before=${currentLastPostId}&limit=15`;
         const response = await fetch(url);
         const newPosts = await response.json();
         
@@ -421,7 +483,7 @@ async function loadMoreProfilePosts() {
         allPosts = [...allPosts, ...newPosts];
         currentLastPostId = newPosts[newPosts.length - 1].id;
         
-        if (newPosts.length < 50) {
+        if (newPosts.length < 15) {
             hasMorePosts = false;
         }
         
@@ -444,8 +506,9 @@ function sendFriendRequest(toUserId) {
 
   fetch('/api/friends/request', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fromUserId, toUserId })
+    body: JSON.stringify({ toUserId })
   })
   .then(r => r.json())
   .then(data => {
@@ -463,11 +526,9 @@ function acceptFriendRequest(requesterUserId) {
   
   fetch('/api/friends/accept', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      currentUserId,
-      requesterUserId
-    })
+    body: JSON.stringify({ requesterUserId })
   })
   .then(r => r.json())
   .then(data => {
@@ -483,11 +544,9 @@ function rejectFriendRequest(requesterUserId) {
   
   fetch('/api/friends/reject', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      currentUserId,
-      requesterUserId
-    })
+    body: JSON.stringify({ requesterUserId })
   })
   .then(r => r.json())
   .then(data => {
@@ -505,9 +564,9 @@ function removeFriend(friendUserId) {
   
   fetch('/api/friends/remove', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      currentUserId,
       friendId: friendUserId
     })
   })
@@ -525,9 +584,9 @@ function cancelFriendRequest(toUserId) {
   
   fetch('/api/friends/cancel', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      fromUserId,
       toUserId
     })
   })
@@ -542,96 +601,6 @@ function cancelFriendRequest(toUserId) {
 
 function openChatWithUser(userId) {
     window.location.href = `/chats?id=${userId}`;
-}
-
-function setupPostButton() {
-  const postButton = document.getElementById('post-button')
-  if (!postButton) return
-  
-  const newPostButton = postButton.cloneNode(true)
-  postButton.parentNode.replaceChild(newPostButton, postButton)
-  
-  newPostButton.addEventListener('click', async function() {
-    const content = document.getElementById('post-input').value.trim()
-    const community = ''
-    const isAnonymous = false
-    const userId = localStorage.getItem('userId')
-    
-    if (!content && selectedFiles.length === 0) {
-      return
-    }
-    
-    const formData = new FormData()
-    formData.append('content', content)
-    formData.append('userId', userId)
-    formData.append('community', community)
-    formData.append('isAnonymous', isAnonymous)
-    
-    selectedFiles.forEach(file => {
-      formData.append('files', file)
-    })
-    
-    try {
-      const response = await fetch('/api/posts', {
-        method: 'POST',
-        body: formData
-      })
-      
-      const data = await response.json()
-      
-      if (data.success) {
-        document.getElementById('post-input').value = ''
-        selectedFiles = []
-        fileTypes = []
-        document.getElementById('files-preview-area').innerHTML = ''
-        togglePreviewVisibility()
-        loadProfile()
-      }
-    } catch (err) {
-      console.error('Error creating post:', err)
-    }
-  })
-}
-
-function setupEnterKey() {
-  const postInput = document.getElementById('post-input')
-  if (!postInput) return
-  
-  postInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      const postButton = document.getElementById('post-button')
-      if (postButton) postButton.click()
-    }
-  })
-}
-
-function setupPasteSupport() {
-  const postInput = document.getElementById('post-input')
-  if (!postInput) return
-  
-  postInput.addEventListener('paste', function(e) {
-    const items = e.clipboardData.items
-    for (let item of items) {
-      if (item.type.indexOf('image') !== -1) {
-        e.preventDefault()
-        const file = item.getAsFile()
-        const fileName = `pasted-image-${Date.now()}.png`
-        const imageFile = new File([file], fileName, { type: file.type })
-        
-        const dataTransfer = new DataTransfer()
-        dataTransfer.items.add(imageFile)
-        document.getElementById('image-input').files = dataTransfer.files
-        
-        const fileInput = document.getElementById('image-input')
-        fileInput.style.border = '2px solid green'
-        setTimeout(() => {
-          fileInput.style.border = ''
-        }, 1000)
-        break
-      }
-    }
-  })
 }
 
 // Scroll listener for profile

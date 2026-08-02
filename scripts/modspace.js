@@ -121,9 +121,13 @@
                         </div>
                         <div class="flag-card-actions">
                             <button class="action-btn secondary" onclick="viewPost(${flag.postId})">Открыть пост</button>
+                            <button class="action-btn secondary" onclick="viewProfile(${flag.postAuthorId})">Автор</button>
+                            <button class="action-btn secondary" onclick="viewProfile(${flag.submittedBy})">Заявитель</button>
+                            <button class="action-btn" onclick="moderateFlag(${flag.id}, 'hide', this)">Скрыть пост</button>
+                            <button class="action-btn secondary" onclick="moderateFlag(${flag.id}, 'unhide', this)">Показать пост</button>
                             <button class="action-btn secondary" onclick="moderateFlag(${flag.id}, 'dismiss', this)">Отклонить жалобу</button>
+                            <button class="action-btn" onclick="moderateFlag(${flag.id}, 'resolve', this)">Закрыть жалобу</button>
                             <button class="action-btn danger" onclick="deleteReportedPost(${flag.postId}, ${flag.id}, this)">Удалить пост</button>
-                            <button class="action-btn danger" onclick="deleteReportedUser(${flag.id}, this)">Удалить пользователя написавшего пост</button>
                         </div>
                     </div>
                 `;
@@ -167,50 +171,17 @@
         }
     }
 
-    function requestModerationReason(actionLabel) {
-        const reason = (window.prompt(`Укажите обязательную причину: ${actionLabel}`) || '').trim();
-        if (!reason) alert('Причина обязательна');
-        return reason;
-    }
-
     async function deleteReportedPost(postId, flagId, button) {
-        const reason = requestModerationReason('удаление поста');
-        if (!reason || !confirm('Удалить этот пост без возможности восстановления?')) return;
-        const card = button.closest('.flag-card');
+        if (!confirm('Удалить этот пост без возможности восстановления?')) return;
         button.disabled = true;
         try {
             const response = await fetch(`/api/posts/${postId}`, {
                 method: 'DELETE',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason, flagId })
+                credentials: 'same-origin'
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || 'Не удалось удалить пост');
-            card.remove();
-            updatePendingCount();
-        } catch (error) {
-            alert(error.message);
-            button.disabled = false;
-        }
-    }
-
-    async function deleteReportedUser(flagId, button) {
-        const reason = requestModerationReason('удаление пользователя');
-        if (!reason || !confirm('Безвозвратно удалить автора, его публикации и связанные данные?')) return;
-        const card = button.closest('.flag-card');
-        button.disabled = true;
-        try {
-            const response = await fetch(`/api/mod/reports/${flagId}/delete-author`, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reason })
-            });
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Не удалось удалить пользователя');
-            card.remove();
-            updatePendingCount();
+            await moderateFlag(flagId, 'resolve', button);
         } catch (error) {
             alert(error.message);
             button.disabled = false;
@@ -416,7 +387,6 @@
     window.resolveFlag = resolveFlag;
     window.moderateFlag = moderateFlag;
     window.deleteReportedPost = deleteReportedPost;
-    window.deleteReportedUser = deleteReportedUser;
     window.toggleAnnouncement = toggleAnnouncement;
     window.viewProfile = viewProfile;
     window.viewPost = viewPost;

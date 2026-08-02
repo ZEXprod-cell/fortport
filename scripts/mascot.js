@@ -15,6 +15,38 @@ let eventOne = ``
 let eventTwo = ``
 let choiceOne = ``
 let choiceTwo = ``
+const videoBlobCache = new Map();
+const CACHE_NAME = 'mascot-video-cache-v1';
+
+async function getCachedVideoUrl(url) { 
+    if (videoBlobCache.has(url)) {
+        return videoBlobCache.get(url);
+    }
+
+    try {
+        const cache = await caches.open(CACHE_NAME);
+        let response = await cache.match(url);
+
+        if (!response) {
+            response = await fetch(url);
+            cache.put(url, response.clone());
+        }
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        videoBlobCache.set(url, objectUrl);
+        return objectUrl;
+
+    } catch (err) {
+        console.warn('Failed to load cached mascot video, falling back to server URL:', err);
+        return url;
+    }
+}
+
+async function precacheAllMascotVideos() {
+    const videoPaths = Object.values(emotionMap);
+    await Promise.all(videoPaths.map(path => getCachedVideoUrl(path)));
+}
 
 const phrases = {
 	"greetings": [
@@ -134,7 +166,7 @@ const phrases = {
 		"/E5/ТЫ СЛЫШАЛ О ТАКОМ КРУТОМ АНИМЕ ХВОСТ ФЕИ?? Я НЕТ =Д",
 		"/E6/Я ЛЮБЛЮ ЩЕНЯТ!!!!",
 		"/E6/Я ЛЮБЛЮ ПТИЧЕК!!!!",
-		"/E5/КОГДА В МОЁМ ГОРОДЕ ТУМАН, ЭТО ПОХОЖЕ НА ОДНУ ИГРУ. ЗАБЫЛА ПРАВДА КАКУЮ...",
+		"/E5/КОГДА В МОЁМ ГОРОДЕ ТУМАН, ЭТО ПОХОЖЕ НА ОДНУ ИГРУ. ЗАБЫЛА ПРАВДА КАКОЮ...",
     		"УМЕЮ ЛИ Я ИГРАТЬ НА ПИАНИНО? КОНЕЧНО НЕТ :D",
     		"МОЙ ЛЮБИМЫЙ ЦВЕТ ГОЛУБОЙ. НЕ ДУМАЮ, ЧТО ЭТО ОЧЕВИДНО!!",
     		"/E7/НЕНАВИЖУ КОГДА У МЕНЯ БОЛИТ ГОЛОВА!",
@@ -235,7 +267,7 @@ const phrases = {
 		"MOTHERLODE! БЛИН, ВСЁ ЕЩЁ НЕ ХВАТАЕТ НА БИОНИКЛОВ(((0(0(((",
 		"IT'S RAINING TACOS!1!!",
 		"О НЕТ, НАУШНИКИ ОПЯТЬ СПУТАЛИСЬ T_T",
-		"/E5/МНЕ НРАВИТСЯ ИГРАТЬ С СИМС, НО МОИ СИМЫ ПОСТОЯННО ТУПЯТ...",
+		"/E5/МНЕ НРАВИТСЯ ИГРАТЬ С СИМС, НО МОИ СИМы ПОСТОЯННО ТУПЯТ...",
 		"Я ЛЮБЛЮ ФЛЕШ ИГРЫ!",
 		"ВЫ БЫ НЕ МОГЛИ ПОДПИСАТЬ МОЮ ПЕТИЦИЮ? :D",
 		"ПОЧЕМУ СЕНТЯБРЬ ГОРИТ? ГДЕ ПОЖАРНЫЕ?!",
@@ -429,7 +461,7 @@ let currentVideoPath = '';
 function clampMascotPosition(mascot, left, top) {
     const rect = mascot.getBoundingClientRect();
     const width = rect.width || 160;
-    const height = rect.height || 220;
+    const height = rect.height || 280;
     return {
         left: Math.max(0, Math.min(left, window.innerWidth - width)),
         top: Math.max(0, Math.min(top, window.innerHeight - height))
@@ -481,18 +513,18 @@ function applyMascotDock(mascot, dock, persist = true, preview = false) {
     mascot.style.transform = 'none';
 
     const rect = mascot.getBoundingClientRect();
-    const w = rect.width || (window.innerWidth <= 830 ? 90 : 160);
-    const h = rect.height || (window.innerWidth <= 830 ? 124 : 220);
+    const w = rect.width// || (window.innerWidth <= 830 ? 90 : 160);
+    const h = rect.height //|| (window.innerWidth <= 830 ? 124 : 220);
     const dx = (h - w) / 2; // overhang of the 90deg-rotated video (side docks)
 
     if (edge === 'left' || edge === 'right') {
-        // Side dock: mascot rotates 90deg and clings to the side edge,
-        // its vertical position along the edge follows the offset.
+
         mascot.style.left = edge === 'left'
             ? `${dx}px`
             : `${Math.round(window.innerWidth - h + dx)}px`;
         mascot.style.top = `${Math.round((window.innerHeight - w) * offset - dx)}px`;
         mascot.style.bottom = 'auto';
+
     } else {
         // Bottom dock: zero position = bottom pixels
         mascot.style.left = `${Math.round((window.innerWidth - w) * offset)}px`;
@@ -629,19 +661,17 @@ function attachMascotInteractions(mascot, video) {
         const y = Math.max(0, Math.min(event.clientY, window.innerHeight));
 
         if (x <= edgeSize) {
-            // Left wall: rotate 90deg, cling to the wall, slide vertically
             dockCandidate = { edge: 'left', offset: y / Math.max(1, window.innerHeight) };
             applyMascotDock(mascot, dockCandidate, false, true);
         } else if (x >= window.innerWidth - edgeSize) {
-            // Right wall: rotate 90deg, cling to the wall, slide vertically
             dockCandidate = { edge: 'right', offset: y / Math.max(1, window.innerHeight) };
             applyMascotDock(mascot, dockCandidate, false, true);
         } else {
             // Middle of the screen: free 2D movement, upright
             dockCandidate = null;
             const r = mascot.getBoundingClientRect();
-            const w = r.width || (window.innerWidth <= 830 ? 90 : 160);
-            const h = r.height || (window.innerWidth <= 830 ? 124 : 220);
+            const w = r.width// || (window.innerWidth <= 830 ? 90 : 160);
+            const h = r.height// || (window.innerWidth <= 830 ? 124 : 220);
             const nLeft = Math.max(0, Math.min(r.left + stepX, window.innerWidth - w));
             const nTop = Math.max(0, Math.min(r.top + stepY, window.innerHeight - h));
             mascot.style.left = `${nLeft}px`;
@@ -668,8 +698,6 @@ function attachMascotInteractions(mascot, video) {
                 // Dropped while clinging to a wall: keep that wall position
                 applyMascotDock(mascot, dockCandidate);
             } else {
-                // Dropped in free space: cling to the nearest surface with
-                // the bottom of the video flush against it (floor or wall)
                 const r = mascot.getBoundingClientRect();
                 const cx = r.left + r.width / 2;
                 const edgeSize = window.innerWidth <= 830 ? 72 : 96;
@@ -714,18 +742,20 @@ function attachMascotInteractions(mascot, video) {
 }
 let preloadVideo = null;
 
-function updateVideo(emotionCode) {
+async function updateVideo(emotionCode, loop = true) {
     const video = document.querySelector('.mascot-video');
     if (!video) return;
     
-    const src = emotionMap[emotionCode];
-    if (!src) return;
+    // Support both emotion keys (e.g. '/E4/') and direct path fallback
+    const rawSrc = emotionMap[emotionCode] || emotionCode;
+    if (!rawSrc) return;
     
-    if (src === currentVideoPath) return;
+    if (rawSrc === currentVideoPath) return;
+
+    const cachedSrc = await getCachedVideoUrl(rawSrc);
     
-    // Preload and swap
     const preload = document.createElement('video');
-    preload.src = src;
+    preload.src = cachedSrc;
     preload.preload = 'auto';
     preload.muted = true;
     preload.style.width = '160px';
@@ -734,20 +764,23 @@ function updateVideo(emotionCode) {
     preload.style.position = 'fixed';
     preload.style.opacity = '0';
     preload.style.pointerEvents = 'none';
+
     preload.onloadeddata = function() {
-        currentVideoPath = src;
-        video.src = src;
-        video.loop = true;
+        currentVideoPath = rawSrc;
+        video.src = cachedSrc;
+        video.loop = loop;
         video.play();
         preload.remove();
     };
+
     preload.onerror = function() {
-        currentVideoPath = src;
-        video.src = src;
-        video.loop = true;
+        currentVideoPath = rawSrc;
+        video.src = cachedSrc;
+        video.loop = loop;
         video.play();
         preload.remove();
-    };
+    }; 
+
     document.body.appendChild(preload);
 }
 
@@ -936,12 +969,7 @@ async function getNews() {
 }
 
 function closeBubble() {
-    const video = document.querySelector('.mascot-video');
-    if (video) {
-        video.src = '/ui/mascot/mascot-stand.webm';
-        video.loop = true;
-        video.play();
-    }
+    updateVideo('/E4/');
     
     if (currentBubble) {
         currentBubble.remove();
@@ -983,58 +1011,56 @@ async function resolveMascotPreferences(isLoggedIn) {
 
 async function initMascot() {
     try {
-	const userId = localStorage.getItem('userId');
+        const userId = localStorage.getItem('userId');
         const isLoggedIn = userId && userId !== 'null' && userId !== 'undefined';
         await resolveMascotPreferences(isLoggedIn);
         
-        //for guest users
+        // --- GUEST USERS ---
         if (!isLoggedIn) {
-	    guestStep = 0;
-	    
-	    const mascot = document.createElement('div');
-	    mascot.classList.add('mascot-dummy');
-	    currentMascot = mascot;
-	    
-	    const video = document.createElement('video');
-	    video.classList.add('mascot-video');
-	    video.src = '/ui/mascot/mascot-wave.webm';
-	    video.autoplay = true;
-	    video.loop = true;
-	    video.muted = true;
-	    video.playsInline = true;
-	    mascot.appendChild(video);
-		    
-	    const speechBubble = document.createElement('div');
-	    speechBubble.classList.add('m-speech-bubble');
-	    currentBubble = speechBubble;
-	    
-	    const phrase = `ПРИВЕТ!!! Меня зовут Жека, а ты - на самой крутой социальной сети в рунете! На ФортПорте! Здесь ты можешь создавать сообщества, и общаться с друзьями!`;
+            guestStep = 0;
+            
+            const mascot = document.createElement('div');
+            mascot.classList.add('mascot-dummy');
+            currentMascot = mascot;
+            
+            const video = document.createElement('video');
+            video.classList.add('mascot-video');
+            video.autoplay = true;
+            video.loop = true;
+            video.muted = true;
+            video.playsInline = true;
+            mascot.appendChild(video);
+                
+            const speechBubble = document.createElement('div');
+            speechBubble.classList.add('m-speech-bubble');
+            currentBubble = speechBubble;
+            
+            const phrase = `ПРИВЕТ!!! Меня зовут Жека, а ты - на самой крутой социальной сети в рунете! На ФортПорте! Здесь ты можешь создавать сообщества, и общаться с друзьями!`;
     
-    	speechBubble.innerHTML = `
-        	<button onclick="closeBubble()" class="m-bubble-close">⨉</button>
-        		<div class="m-speech-text">${phrase}</div>
-        		<div class="m-speech-buttons-row">
-            			<button class="m-speech-button" onclick="newPhrase()">Дальше</button>
-        		</div>
-    		`;
+            speechBubble.innerHTML = `
+                <button onclick="closeBubble()" class="m-bubble-close">⨉</button>
+                <div class="m-speech-text">${phrase}</div>
+                <div class="m-speech-buttons-row">
+                    <button class="m-speech-button" onclick="newPhrase()">Дальше</button>
+                </div>
+            `;
     
-    		document.body.appendChild(mascot);
-    		mascot.appendChild(speechBubble);
+            // MUST append mascot to document BEFORE calling updateVideo!
+            document.body.appendChild(mascot);
+            mascot.appendChild(speechBubble);
             attachMascotInteractions(mascot, video);
-    		return;
-	}
+            await updateVideo('/E2/');
+            return;
+        }
         
-        // Get username and other data
         const username = localStorage.getItem('username') || 'друг';
-        const totalusers = 420; // Replace with actual count
-        const totalports = 69; // Replace with actual count
         
         // Create mascot container
         const mascot = document.createElement('div');
         mascot.classList.add('mascot-dummy');
         currentMascot = mascot;
         
-        // Create video
+        // Create video element
         const video = document.createElement('video');
         video.classList.add('mascot-video');
         video.autoplay = true;
@@ -1045,9 +1071,8 @@ async function initMascot() {
         
         let speechBubble = null;
 
-	 if (bricked == -1) {
-            video.src = '/ui/mascot/mascot-wave.webm';
-            
+        // --- FIRST: BRICKED / FIRST VISIT ---
+        if (bricked == -1) {
             const phrase = `ХЕЙ ${username}! МЕНЯ ЗОВУТ ЖЕКА! Я БУДУ ЗДЕСЬ КАЖДЫЙ РАЗ КОГДА САЙТ ОБНОВЛЯЕТСЯ! ТЫ МОЖЕШЬ КИНУТЬ В МЕНЯ КИРПИЧ ЧТОБЫ УБРАТЬ, ЕСЛИ Я БУДУ ТЕБЕ МЕШАТЬ!`;
             
             speechBubble = document.createElement('div');
@@ -1070,6 +1095,7 @@ async function initMascot() {
             document.body.appendChild(mascot);
             mascot.appendChild(speechBubble);
             attachMascotInteractions(mascot, video);
+            await updateVideo('/E2/');
             return;
         }
         
@@ -1077,10 +1103,10 @@ async function initMascot() {
         const hasNews = await getNews();
         if (hasNews && newsPhrases.length > 0) {
             window.newsPhrasesOriginalLength = newsPhrases.length;
-            video.src = '/ui/mascot/mascot-lookout.webm';
-            video.loop = true;
+            
             document.body.appendChild(mascot);
             attachMascotInteractions(mascot, video);
+            await updateVideo('/E1/');
             
             mascot.addEventListener('click', function newsClickHandler(e) {
                 if (e.target.closest('.m-speech-bubble')) return;
@@ -1111,18 +1137,14 @@ async function initMascot() {
                     }
                 });
             });
-            
-            document.body.appendChild(mascot);
-            attachMascotInteractions(mascot, video);
             return;
         }
         
         // --- THIRD: CHECK HANDHOLDING ---
         if (hhPhrases.length > 0) {
-            video.src = '/ui/mascot/mascot-lookout.webm';
-            video.loop = true;
             document.body.appendChild(mascot);
             attachMascotInteractions(mascot, video);
+            await updateVideo('/E1/');
             
             mascot.addEventListener('click', function hhClickHandler(e) {
                 if (e.target.closest('.m-speech-bubble')) return;
@@ -1153,17 +1175,13 @@ async function initMascot() {
                     }
                 });
             });
-            
-            document.body.appendChild(mascot);
-            attachMascotInteractions(mascot, video);
             return;
         }
         
         // --- FOURTH: NORMAL (bricked === 0) ---
-        video.src = '/ui/mascot/mascot-peek.webm';
-        video.loop = true;
         document.body.appendChild(mascot);
         attachMascotInteractions(mascot, video);
+        await updateVideo('/E0/');
         
         mascot.addEventListener('click', (e) => {
             if (e.target.closest('.m-speech-bubble')) return;
@@ -1460,12 +1478,7 @@ function completeHH() {
     hhSecondary = [];
     
     // Change to stand
-    const video = document.querySelector('.mascot-video');
-    if (video) {
-        video.src = '/ui/mascot/mascot-stand.webm';
-        video.loop = true;
-        video.play();
-    }
+    updateVideo('/E4/');
 }
 
 async function markAllNewsAsRead() {
@@ -1501,12 +1514,7 @@ function openBubble() {
     if (!mascot) return;
     
     // Change video to wave
-    const video = document.querySelector('.mascot-video');
-    if (video) {
-        video.src = '/ui/mascot/mascot-wave.webm';
-        video.loop = true;
-        video.play();
-    }
+    updateVideo('/E2/');
     
     // Create empty bubble
     const speechBubble = document.createElement('div');
@@ -1525,13 +1533,8 @@ function openBubble() {
 }
 
 function throwBrick() {
-    // Change video to killed animation
-    const video = document.querySelector('.mascot-video');
-    if (video) {
-        video.src = '/ui/mascot/mascot-killed.webm';
-        video.loop = false;
-        video.play();
-    }
+    // Change video to killed animation (non-looping)
+    updateVideo('/E3/', false);
     
     fetch(`/api/users/mascot/status`, { 
         method: 'POST', 
@@ -1561,15 +1564,14 @@ function mascotAccept() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    precacheAllMascotVideos();
     await detectPage();
     await initMascot();
 });
-
-
 
 window.throwBrick = throwBrick;
 window.mascotAccept = mascotAccept;
 window.closeBubble = closeBubble;
 window.newPhrase = newPhrase;
 window.openBubble = openBubble;
-window.hhPhrases = hhPhrases
+window.hhPhrases = hhPhrases;

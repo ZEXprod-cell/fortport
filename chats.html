@@ -12,14 +12,14 @@
     <script src="/scripts/client.js" type="module"></script>
     <script src="/scripts/friends.js"></script>
 </head>
-<body style="overflow:hidden">
+<body class="chats-page" style="overflow:hidden">
 
-<div style="display:flex; flex-direction:row; width:100%; margin-top:20px">
-	<div class="feedmain" style="min-width: 30%; margin-left: 0; padding: 0; max-width:512px; ">
+<div class="chats-page-shell">
+	<div class="feedmain chats-sidebar">
     	<div class="chats-layout" >
             <div class="chats-list-panel">
-                <div style="display: flex; align-items:left; margin-top:-25px">
-		<img src="/ui/icons/chats_aero.webp" style="height:75px; width:auto;">
+                <div class="chats-page-heading">
+		<img src="/ui/icons/chats_aero.webp" alt="">
                 <h2>Переписки</h2>
                 </div>
               <div class="chats-scrollable" id="chats-list-container">
@@ -32,14 +32,17 @@
         </div>
 </div>
 
-<div class="feedmain" id="chat-feedmain" style="padding: 0;  margin-left: 30px; margin-right: 30px; margin-bottom: 40px; height: calc(93dvh - 60px); background-color: #bccee2; max-width:none; width:65%;"; position:relative>
+<div class="feedmain chat-feedmain" id="chat-feedmain">
         <!-- RIGHT PANEL: active chat -->
         <div class="chat-container-panel" id="active-chat-panel" style="display: none;">
             <div class="chat-header-info">
+                <button type="button" class="chat-mobile-back" id="chat-mobile-back" aria-label="Вернуться к списку переписок">←</button>
                 <div class="chat-partner-info">
                     <img id="chat-partner-avatar" class="chat-partner-avatar frutiger-aero-border" src="/default-avatar.jpg">
-                    <div>
-                        <div class="chat-partner-name" id="chat-partner-name">...</div>
+                    <div class="chat-partner-text">
+                        <div class="role-identity-line chat-partner-name-line">
+                            <div class="chat-partner-name" id="chat-partner-name">...</div>
+                        </div>
                         <div class="chat-partner-status" id="chat-partner-status"></div>
                     </div>
                 </div>
@@ -79,6 +82,5 @@
 </div>
 
 <script type="module" src="/scripts/chats.js"></script>
-  <script src="/scripts/online-counter.js"></script>
 </body>
 </html>
